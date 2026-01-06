@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/microsoft/go-winmd"
 	"github.com/saltosystems/winrt-go"
 	"github.com/saltosystems/winrt-go/internal/winmd"
-	"github.com/tdakkota/win32metadata/types"
 	"golang.org/x/tools/imports"
 )
 
@@ -620,7 +620,7 @@ func (g *generator) getGenFuncs(typeDef *winmd.TypeDef, requiresActivation bool)
 	return genFuncs, nil
 }
 
-func (g *generator) genFuncFromMethod(typeDef *winmd.TypeDef, methodDef *types.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
+func (g *generator) genFuncFromMethod(typeDef *winmd.TypeDef, methodDef *winmd.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
 	// add the type imports to the top of the file
 	// only if the method is going to be implemented
 
@@ -684,7 +684,7 @@ func (g *generator) shouldImplementMethod(methodName string) bool {
 	return g.methodFilter.Filter(methodName)
 }
 
-func (g *generator) getInParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
+func (g *generator) getInParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *winmd.MethodDef) ([]*genParam, error) {
 
 	params, err := methodDef.ResolveParamList(typeDef.Ctx())
 	if err != nil {
@@ -753,7 +753,7 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmd.TypeDef, m
 	return genParams, nil
 }
 
-func (g *generator) getReturnParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
+func (g *generator) getReturnParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *winmd.MethodDef) ([]*genParam, error) {
 	// the signature contains the parameter
 	// types and return type of the method
 	r := methodDef.Signature.Reader()
@@ -785,7 +785,7 @@ func (g *generator) getReturnParameters(curPackage string, typeDef *winmd.TypeDe
 	return genParams, nil
 }
 
-func getParamName(params []types.Param, i uint16) string {
+func getParamName(params []winmd.Param, i uint16) string {
 	for _, p := range params {
 		if p.Sequence == i {
 			return p.Name
@@ -794,7 +794,7 @@ func getParamName(params []types.Param, i uint16) string {
 	return fmt.Sprintf("__ERROR_PARAM_%d_NOT_FOUND__", i)
 }
 
-func getParamByIndex(params []types.Param, i uint16) *types.Param {
+func getParamByIndex(params []winmd.Param, i uint16) *winmd.Param {
 	for _, p := range params {
 		if p.Sequence == i {
 			return &p

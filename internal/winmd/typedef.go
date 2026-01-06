@@ -378,3 +378,37 @@ func guidBlobToString(b []byte) (string, error) {
 		uint16(guid[10])<<8|uint16(guid[11]),
 		uint32(guid[12])<<24|uint32(guid[13])<<16|uint32(guid[14])<<8|uint32(guid[15])), nil
 }
+
+// ResolveMethodList resolves the MethodList and returns all methods for this TypeDef
+func (typeDef *TypeDef) ResolveMethodList(ctx *winmd.Metadata) ([]*winmd.MethodDef, error) {
+	if typeDef.MethodList.Start == typeDef.MethodList.End {
+		return nil, nil
+	}
+
+	result := make([]*winmd.MethodDef, 0, typeDef.MethodList.End-typeDef.MethodList.Start)
+	for i := typeDef.MethodList.Start; i < typeDef.MethodList.End; i++ {
+		methodDef, err := ctx.Tables.MethodDef.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, methodDef)
+	}
+	return result, nil
+}
+
+// ResolveFieldList resolves the FieldList and returns all fields for this TypeDef
+func (typeDef *TypeDef) ResolveFieldList(ctx *winmd.Metadata) ([]*winmd.Field, error) {
+	if typeDef.FieldList.Start == typeDef.FieldList.End {
+		return nil, nil
+	}
+
+	result := make([]*winmd.Field, 0, typeDef.FieldList.End-typeDef.FieldList.Start)
+	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
+		field, err := ctx.Tables.Field.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, field)
+	}
+	return result, nil
+}
