@@ -40,7 +40,7 @@ func Generate(cfg *Config, logger log.Logger) error {
 		return err
 	}
 
-	mdStore, err := winmd.NewStore(logger)
+	mdStore, err := winmdLocal.NewStore(logger)
 	if err != nil {
 		return err
 	}
@@ -71,7 +71,7 @@ func (g *generator) generate(typeDef *winmdLocal.TypeDef) error {
 	// we only support WinRT types: check the tdWindowsRuntime flag (0x4000)
 	// https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#runtime-classes
 	if typeDef.Flags&0x4000 == 0 {
-		return fmt.Errorf("%s.%s is not a WinRT class", typeDef.TypeNamespace, typeDef.TypeName)
+		return fmt.Errorf("%s.%s is not a WinRT class", typeDef.Namespace.String(), typeDef.Name.String())
 	}
 
 	// get data & execute templates
@@ -164,7 +164,7 @@ func (g *generator) loadCodeGenData(typeDef *winmdLocal.TypeDef) error {
 
 	switch {
 	case typeDef.IsInterface():
-		_ = level.Info(g.logger).Log("msg", "generating interface", "interface", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating interface", "interface", typeDef.Namespace.String()+"."+typeDef.Name.String())
 
 		if err := g.validateInterface(typeDef); err != nil {
 			return err
@@ -176,7 +176,7 @@ func (g *generator) loadCodeGenData(typeDef *winmdLocal.TypeDef) error {
 		}
 		f.Data.Interfaces = append(f.Data.Interfaces, iface)
 	case typeDef.IsEnum():
-		_ = level.Info(g.logger).Log("msg", "generating enum", "enum", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating enum", "enum", typeDef.Namespace.String()+"."+typeDef.Name.String())
 
 		enum, err := g.createGenEnum(typeDef)
 		if err != nil {
@@ -184,7 +184,7 @@ func (g *generator) loadCodeGenData(typeDef *winmdLocal.TypeDef) error {
 		}
 		f.Data.Enums = append(f.Data.Enums, enum)
 	case typeDef.IsStruct():
-		_ = level.Info(g.logger).Log("msg", "generating struct", "struct", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating struct", "struct", typeDef.Namespace.String()+"."+typeDef.Name.String())
 
 		genStruct, err := g.createGenStruct(typeDef)
 		if err != nil {
@@ -198,7 +198,7 @@ func (g *generator) loadCodeGenData(typeDef *winmdLocal.TypeDef) error {
 		}
 		f.Data.Delegates = append(f.Data.Delegates, delegate)
 	default:
-		_ = level.Info(g.logger).Log("msg", "generating class", "class", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating class", "class", typeDef.Namespace.String()+"."+typeDef.Name.String())
 
 		class, err := g.createGenClass(typeDef)
 		if err != nil {
@@ -211,12 +211,12 @@ func (g *generator) loadCodeGenData(typeDef *winmdLocal.TypeDef) error {
 }
 
 func (g *generator) addFile(typeDef *winmdLocal.TypeDef, suffix string) *genDataFile {
-	folder := typeToFolder(typeDef.TypeNamespace, typeDef.TypeName)
-	filename := folder + "/" + typeFilename(typeDef.TypeName) + suffix + ".go"
+	folder := typeToFolder(typeDef.Namespace.String(), typeDef.Name.String())
+	filename := folder + "/" + typeFilename(typeDef.Name.String()) + suffix + ".go"
 	f := genDataFile{
 		Filename: filename,
 		Data: genData{
-			Package: typePackage(typeDef.TypeNamespace, typeDef.TypeName),
+			Package: typePackage(typeDef.Namespace.String(), typeDef.Name.String()),
 		},
 	}
 	g.genDataFiles = append(g.genDataFiles, &f)
@@ -230,8 +230,8 @@ func (g *generator) validateInterface(typeDef *winmdLocal.TypeDef) error {
 	// we do not support generating these types of classes, they are exclusive to a runtime class,
 	// and thus will be generated when the runtime class is generated.
 
-	if typeDef.Flags.NotPublic() {
-		return fmt.Errorf("interface %s is not public", typeDef.TypeNamespace+"."+typeDef.TypeName)
+	if (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_NotPublic) {
+		return fmt.Errorf("interface %s is not public", typeDef.Namespace.String()+"."+typeDef.Name.String())
 	}
 	return nil
 }
@@ -255,7 +255,7 @@ func (g *generator) createGenInterface(typeDef *winmdLocal.TypeDef, requiresActi
 	}
 
 	return &genInterface{
-		Name:      typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		Name:      typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 		GUID:      guid,
 		Signature: typeSig,
 		Funcs:     funcs,
@@ -291,13 +291,13 @@ func (g *generator) createGenClass(typeDef *winmdLocal.TypeDef) (*genClass, erro
 		}
 
 		pkg := ""
-		if typeDef.TypeNamespace != ifaceTypeDef.TypeNamespace {
+		if typeDef.Namespace.String() != ifaceTypeDef.Namespace.String() {
 			pkg = typePackage(iface.Namespace, iface.Name)
 		}
 		for _, f := range itf.Funcs {
-			f.InheritedFrom = winmd.QualifiedID{
+			f.InheritedFrom = winmdLocal.QualifiedID{
 				Namespace: pkg,
-				Name:      typeDefGoName(ifaceTypeDef.TypeName, ifaceTypeDef.Flags.Public()),
+				Name:      typeDefGoName(ifaceTypeDef.Name.String(), (ifaceTypeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 			}
 		}
 
@@ -309,7 +309,7 @@ func (g *generator) createGenClass(typeDef *winmdLocal.TypeDef) (*genClass, erro
 		if td, err := g.mdStore.TypeDefByName(iface.Namespace + "." + iface.Name); err == nil {
 			if _, ok := g.interfaceIsExclusiveTo(td); ok {
 				exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, td)
-				activatedInterfaces[td.TypeNamespace+"."+td.TypeName] = false // implemented interfaces do not require activation
+				activatedInterfaces[td.Namespace.String()+"."+td.Name.String()] = false // implemented interfaces do not require activation
 			}
 		}
 	}
@@ -327,7 +327,7 @@ func (g *generator) createGenClass(typeDef *winmdLocal.TypeDef) (*genClass, erro
 		}
 
 		exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, staticClass)
-		activatedInterfaces[staticClass.TypeNamespace+"."+staticClass.TypeName] = true // static interfaces require activation
+		activatedInterfaces[staticClass.Namespace.String()+"."+staticClass.Name.String()] = true // static interfaces require activation
 	}
 
 	// Runtime classes have zero or more ActivatableAttribute custom attributes
@@ -355,13 +355,13 @@ func (g *generator) createGenClass(typeDef *winmdLocal.TypeDef) (*genClass, erro
 			continue
 		}
 		exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, activatableClass)
-		activatedInterfaces[activatableClass.TypeNamespace+"."+activatableClass.TypeName] = true // activatable interfaces require activation
+		activatedInterfaces[activatableClass.Namespace.String()+"."+activatableClass.Name.String()] = true // activatable interfaces require activation
 	}
 
 	// generate exclusive interfaces
 	var exclusiveGenInterfaces []*genInterface
 	for _, iface := range exclusiveInterfaceTypes {
-		requiresActivation := activatedInterfaces[iface.TypeNamespace+"."+iface.TypeName]
+		requiresActivation := activatedInterfaces[iface.Namespace.String()+"."+iface.Name.String()]
 		isExtendedInterface := !requiresActivation
 
 		ifaceGen, err := g.createGenInterface(iface, requiresActivation)
@@ -390,14 +390,14 @@ func (g *generator) createGenClass(typeDef *winmdLocal.TypeDef) (*genClass, erro
 	}
 
 	return &genClass{
-		Name:                typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		Name:                typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 		Signature:           typeSig,
 		RequiresImports:     requiredImports,
-		FullyQualifiedName:  typeDef.TypeNamespace + "." + typeDef.TypeName,
+		FullyQualifiedName:  typeDef.Namespace.String() + "." + typeDef.Name.String(),
 		ImplInterfaces:      implInterfaces,
 		ExclusiveInterfaces: exclusiveGenInterfaces,
 		HasEmptyConstructor: hasEmptyConstructor,
-		IsAbstract:          typeDef.Flags.Abstract(),
+		IsAbstract:          (typeDef.Flags & flags.TypeAttributes_Abstract != 0),
 	}, nil
 }
 
@@ -411,19 +411,21 @@ func (g *generator) createGenEnum(typeDef *winmdLocal.TypeDef) (*genEnum, error)
 	// An enum has a single instance field that specifies the underlying integer type for the enum,
 	// as well as zero or more static fields; one for each enum value defined by the enum type.
 	if len(fields) == 0 {
-		return nil, fmt.Errorf("enum %s has no fields", typeDef.TypeName)
+		return nil, fmt.Errorf("enum %s has no fields", typeDef.Name.String())
 	}
 
 	// the first row should be the underlying integer type of the enum. It must have the following flags:
-	if !(fields[0].Flags.Private() && fields[0].Flags.SpecialName() && fields[0].Flags.RTSpecialName()) {
-		return nil, fmt.Errorf("enum %s has more than one instance field, expected 1", typeDef.TypeNamespace+"."+typeDef.TypeName)
+	if !((fields[0].Flags & flags.FieldAttributes_FieldAccessMask == flags.FieldAttributes_Private) && (fields[0].Flags & flags.FieldAttributes_SpecialName != 0) && (fields[0].Flags & flags.FieldAttributes_RTSpecialName != 0)) {
+		return nil, fmt.Errorf("enum %s has more than one instance field, expected 1", typeDef.Namespace.String()+"."+typeDef.Name.String())
 	}
 
-	fieldSig, err := fields[0].Signature.Reader().Field(typeDef.Ctx())
+	// Parse the first field's signature to get the underlying enum type
+	fieldSig, err := typeDef.Ctx().FieldSignature(fields[0].Signature)
 	if err != nil {
 		return nil, err
 	}
-	elType, err := g.elementType(typeDef.Ctx(), fieldSig.Field)
+	
+	elType, err := g.sigTypeToGenParamType(typeDef.Ctx(), fieldSig.Type, "")
 	if err != nil {
 		return nil, err
 	}
@@ -433,22 +435,22 @@ func (g *generator) createGenEnum(typeDef *winmdLocal.TypeDef) (*genEnum, error)
 	// After the enum value definition comes a field definition for each of the values in the enumeration.
 	var enumValues []*genEnumValue
 	for i, field := range fields[1:] {
-		if !(field.Flags.Public() && field.Flags.Static() && field.Flags.Literal() && field.Flags.HasDefault()) {
+		if !((field.Flags & flags.FieldAttributes_FieldAccessMask == flags.FieldAttributes_Public) && (field.Flags & flags.FieldAttributes_Static != 0) && (field.Flags & flags.FieldAttributes_Literal != 0) && (field.Flags & flags.FieldAttributes_HasDefault != 0)) {
 			return nil,
 				fmt.Errorf(
 					"enum %s field value does not comply with the spec. Checkout https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#enums",
-					typeDef.TypeNamespace+"."+typeDef.TypeName,
+					typeDef.Namespace.String()+"."+typeDef.Name.String(),
 				)
 		}
 
-		var fieldIndex uint32 = typeDef.FieldList.Start() + 1 + uint32(i)
+		var fieldIndex uint32 = uint32(typeDef.FieldList.Start) + 1 + uint32(i)
 		enumRawValue, err := typeDef.GetValueForEnumField(fieldIndex)
 		if err != nil {
 			return nil, err
 		}
 
 		enumValues = append(enumValues, &genEnumValue{
-			Name:  enumName(typeDef.TypeName, field.Name),
+			Name:  enumName(typeDef.Name.String(), field.Name.String()),
 			Value: enumRawValue,
 		})
 	}
@@ -459,7 +461,7 @@ func (g *generator) createGenEnum(typeDef *winmdLocal.TypeDef) (*genEnum, error)
 	}
 
 	return &genEnum{
-		Name:      typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		Name:      typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 		Type:      enumType,
 		Signature: typeSig,
 		Values:    enumValues,
@@ -474,16 +476,17 @@ func (g *generator) createGenStruct(typeDef *winmdLocal.TypeDef) (*genStruct, er
 		return nil, err
 	}
 
-	curPkg := typePackage(typeDef.TypeNamespace, typeDef.TypeName)
+	curPkg := typePackage(typeDef.Namespace.String(), typeDef.Name.String())
 
 	var genFields []*genParam
 	for _, f := range fields {
-		fSig, err := f.Signature.Reader().Field(typeDef.Ctx())
+		// Parse field signature using new API
+		fieldSig, err := typeDef.Ctx().FieldSignature(f.Signature)
 		if err != nil {
 			return nil, err
 		}
 
-		fieldType, err := g.elementType(typeDef.Ctx(), fSig.Field)
+		fieldType, err := g.sigTypeToGenParamType(typeDef.Ctx(), fieldSig.Type, curPkg)
 		if err != nil {
 			return nil, err
 		}
@@ -491,7 +494,7 @@ func (g *generator) createGenStruct(typeDef *winmdLocal.TypeDef) (*genStruct, er
 		// Struct fields must be fundamental types, enums, or other structs
 		genFields = append(genFields, &genParam{
 			callerPackage: curPkg,
-			varName:       cleanReservedWords(f.Name),
+			varName:       cleanReservedWords(f.Name.String()),
 			IsOut:         false,
 			Type:          fieldType,
 		})
@@ -503,7 +506,7 @@ func (g *generator) createGenStruct(typeDef *winmdLocal.TypeDef) (*genStruct, er
 	}
 
 	return &genStruct{
-		Name:      typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		Name:      typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 		Signature: typeSig,
 		Fields:    genFields,
 	}, nil
@@ -526,7 +529,7 @@ func (g *generator) createGenDelegate(typeDef *winmdLocal.TypeDef) (*genDelegate
 	}
 
 	if len(methods) != 2 {
-		return nil, fmt.Errorf("delegate %s has more than two methods", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		return nil, fmt.Errorf("delegate %s has more than two methods", typeDef.Namespace.String()+"."+typeDef.Name.String())
 	}
 
 	// This constructor is a compatibility marker. WinRT Delegates have no such constructor method.
@@ -536,7 +539,7 @@ func (g *generator) createGenDelegate(typeDef *winmdLocal.TypeDef) (*genDelegate
 	if invokeMethod.Name.String() != invokeMethodName {
 		return nil, fmt.Errorf("found method '%s' on delegate %s but expected '%s'",
 			invokeMethod.Name.String(),
-			typeDef.TypeNamespace+"."+typeDef.TypeName,
+			typeDef.Namespace.String()+"."+typeDef.Name.String(),
 			invokeMethodName,
 		)
 	}
@@ -555,7 +558,7 @@ func (g *generator) createGenDelegate(typeDef *winmdLocal.TypeDef) (*genDelegate
 	}
 
 	return &genDelegate{
-		Name:      typeDefGoName(typeDef.TypeName, true),
+		Name:      typeDefGoName(typeDef.Name.String(), true),
 		GUID:      guid,
 		Signature: typeSig,
 		InParams:  f.InParams,
@@ -636,13 +639,13 @@ func (g *generator) genFuncFromMethod(typeDef *winmdLocal.TypeDef, methodDef *wi
 			Implement:          implement,
 			InParams:           nil,
 			ReturnParams:       nil,
-			FuncOwner:          typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+			FuncOwner:          typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 			ExclusiveTo:        exclusiveTo,
 			RequiresActivation: requiresActivation,
 		}, nil
 	}
 
-	curPackage := typePackage(typeDef.TypeNamespace, typeDef.TypeName)
+	curPackage := typePackage(typeDef.Namespace.String(), typeDef.Name.String())
 
 	params, err := g.getInParameters(curPackage, typeDef, methodDef)
 	if err != nil {
@@ -675,7 +678,7 @@ func (g *generator) genFuncFromMethod(typeDef *winmdLocal.TypeDef, methodDef *wi
 		Implement:          implement,
 		InParams:           params,
 		ReturnParams:       retParams,
-		FuncOwner:          typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		FuncOwner:          typeDefGoName(typeDef.Name.String(), (typeDef.Flags & flags.TypeAttributes_VisibilityMask == flags.TypeAttributes_Public)),
 		ExclusiveTo:        exclusiveTo,
 		RequiresActivation: requiresActivation,
 	}, nil
@@ -804,297 +807,6 @@ func getParamByIndex(params []winmd.Param, i uint16) *winmd.Param {
 	return nil
 }
 
-func (g *generator) elementType(ctx *types.Context, e types.Element) (*genParamType, error) {
-	switch e.Type.Kind {
-	case types.ELEMENT_TYPE_BOOLEAN:
-		return &genParamType{
-			namespace:    "",
-			name:         "bool",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_CHAR:
-		return &genParamType{
-			namespace:    "",
-			name:         "byte",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_I1:
-		return &genParamType{
-			namespace:    "",
-			name:         "int8",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_U1:
-		return &genParamType{
-			namespace:    "",
-			name:         "uint8",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_I2:
-		return &genParamType{
-			namespace:    "",
-			name:         "int16",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_U2:
-		return &genParamType{
-			namespace:    "",
-			name:         "uint16",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_I4:
-		return &genParamType{
-			namespace:    "",
-			name:         "int32",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_U4:
-		return &genParamType{
-			namespace:    "",
-			name:         "uint32",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_I8:
-		return &genParamType{
-			namespace:    "",
-			name:         "int64",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_U8:
-		return &genParamType{
-			namespace:    "",
-			name:         "uint64",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_R4:
-		return &genParamType{
-			namespace:    "",
-			name:         "float32",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_R8:
-		return &genParamType{
-			namespace:    "",
-			name:         "float64",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_STRING:
-		return &genParamType{
-			namespace:    "",
-			name:         "string",
-			IsPointer:    false,
-			IsPrimitive:  true,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_GENERICINST:
-		fallthrough
-	case types.ELEMENT_TYPE_CLASS:
-		// return class name
-		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
-		if err != nil {
-			return nil, err
-		}
-		return &genParamType{
-			namespace:    namespace,
-			name:         name,
-			IsPointer:    true,
-			IsPrimitive:  false,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_VALUETYPE:
-		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
-		if err != nil {
-			return nil, err
-		}
-
-		// Check for system types
-		if t, ok := isSystemType(namespace, name); ok {
-			return t, nil
-		}
-
-		elementTypeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)
-		if err != nil {
-			return nil, err
-		}
-
-		// if its an enum, we will need the underlying type
-		isEnum := false
-		enumType := ""
-		if elementTypeDef.IsEnum() {
-			enumData, err := g.createGenEnum(elementTypeDef)
-			if err != nil {
-				return nil, err
-			}
-
-			// Treat the enum as a primitive
-			isEnum = true
-			enumType = enumData.Type
-		}
-		return &genParamType{
-			namespace:          namespace,
-			name:               name,
-			IsPointer:          false,
-			IsPrimitive:        false,
-			IsArray:            false,
-			IsEnum:             isEnum,
-			UnderlyingEnumType: enumType,
-			defaultValue:       g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_VAR:
-		// Generic types are not fully supported yet,
-		// so we will just pass the raw unsafe.Pointer up to the user.
-		return &genParamType{
-			namespace:    "unsafe",
-			name:         "Pointer",
-			IsGeneric:    true,
-			IsPointer:    false,
-			IsPrimitive:  false,
-			IsArray:      false,
-			defaultValue: g.elementDefaultValue(ctx, e),
-		}, nil
-	case types.ELEMENT_TYPE_SZARRAY:
-		//A single-dimensional, zero lower-bound array type modifier
-
-		// e.Type.SZArray.Elem should be non-nil
-		param, err := g.elementType(ctx, *e.Type.SZArray.Elem)
-		if err != nil {
-			return nil, err
-		}
-
-		param.IsArray = true
-		// override default val
-		param.defaultValue = genDefaultValue{"nil", true}
-
-		return param, err
-	case types.ELEMENT_TYPE_OBJECT:
-		// This represents System.Object, so just use a pointer
-		return &genParamType{
-			namespace:    "unsafe",
-			name:         "Pointer",
-			IsPointer:    false,
-			IsPrimitive:  false,
-			IsArray:      false,
-			defaultValue: genDefaultValue{"nil", true},
-		}, nil
-	default:
-		return nil, fmt.Errorf("unsupported element type: %v", e.Type.Kind)
-	}
-}
-
-func isSystemType(namespace, name string) (*genParamType, bool) {
-	if namespace != "System" {
-		return nil, false
-	}
-	switch name {
-	case "Guid":
-		// System.Guid is a struct (value type), so we can just
-		// use syscall.GUID which has the same structure
-		return &genParamType{
-			namespace:    "syscall",
-			name:         "GUID",
-			IsPointer:    false,
-			IsPrimitive:  false,
-			IsArray:      false,
-			IsEnum:       false,
-			defaultValue: genDefaultValue{value: "GUID{}", isPrimitive: false},
-		}, true
-	}
-
-	return nil, false
-}
-
-func (g *generator) elementDefaultValue(ctx *types.Context, e types.Element) genDefaultValue {
-	switch e.Type.Kind {
-	case types.ELEMENT_TYPE_BOOLEAN:
-		return genDefaultValue{"false", true}
-	case types.ELEMENT_TYPE_CHAR,
-		types.ELEMENT_TYPE_I1, types.ELEMENT_TYPE_U1,
-		types.ELEMENT_TYPE_I2, types.ELEMENT_TYPE_U2,
-		types.ELEMENT_TYPE_I4, types.ELEMENT_TYPE_U4,
-		types.ELEMENT_TYPE_I8, types.ELEMENT_TYPE_U8:
-		return genDefaultValue{"0", true}
-	case types.ELEMENT_TYPE_R4, types.ELEMENT_TYPE_R8:
-		return genDefaultValue{"0.0", true}
-	case types.ELEMENT_TYPE_STRING:
-		return genDefaultValue{"\"\"", true}
-	case types.ELEMENT_TYPE_CLASS,
-		types.ELEMENT_TYPE_GENERICINST, types.ELEMENT_TYPE_SZARRAY:
-		return genDefaultValue{"nil", true}
-	case types.ELEMENT_TYPE_VALUETYPE:
-		// we need to get the underlying type (enum, struct, etc...)
-		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
-		if err != nil {
-			return genDefaultValue{"__ERROR_" + err.Error(), true}
-		}
-		elementTypeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)
-		if err != nil {
-			return genDefaultValue{"__ERROR_" + err.Error(), true}
-		}
-
-		if elementTypeDef.IsEnum() {
-			// return the first enum value
-			fields, err := elementTypeDef.ResolveFieldList(ctx)
-			if err != nil {
-				return genDefaultValue{"__ERROR_" + err.Error(), true}
-			}
-			// the first field defines the enum type, the second is the first value
-			if len(fields) < 2 {
-				return genDefaultValue{"__ERROR_" + fmt.Errorf("enum %v has no fields", namespace+"."+name).Error(), true}
-			}
-
-			return genDefaultValue{enumName(elementTypeDef.TypeName, fields[1].Name), false}
-		} else if elementTypeDef.IsStruct() {
-			return genDefaultValue{elementTypeDef.TypeName + "{}", false}
-		}
-
-		return genDefaultValue{"nil", true}
-	case types.ELEMENT_TYPE_VAR:
-		return genDefaultValue{"nil", true}
-	case types.ELEMENT_TYPE_OBJECT:
-		return genDefaultValue{"nil", true}
-	default:
-		return genDefaultValue{"__ERROR_" + fmt.Errorf("unsupported element type: %v", e.Type.Kind).Error(), true}
-	}
-}
-
 func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 	// Signature generation defined in
 	// https://docs.microsoft.com/en-us/uwp/winrt-cref/winrt-type-system#guid-generation-for-parameterized-types
@@ -1140,7 +852,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		}
 
 		enumType := primitiveTypeSignature(fieldSig.Field.Type.Kind)
-		return fmt.Sprintf(`enum(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, enumType), nil
+		return fmt.Sprintf(`enum(%s;%s)`, typeDef.Namespace.String()+"."+typeDef.Name.String(), enumType), nil
 	case typeDef.IsStruct():
 		// struct_signature => "struct(" struct_name ";" args ")"
 		fields, err := typeDef.ResolveFieldList(typeDef.Ctx())
@@ -1177,7 +889,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 				structArgs = append(structArgs, primitiveTypeSignature(fSig.Field.Type.Kind))
 			}
 		}
-		return fmt.Sprintf(`struct(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, strings.Join(structArgs, ";")), nil
+		return fmt.Sprintf(`struct(%s;%s)`, typeDef.Namespace.String()+"."+typeDef.Name.String(), strings.Join(structArgs, ";")), nil
 	case typeDef.IsDelegate():
 		//delegate_signature => "delegate(" guid ")"
 		guid, err := typeDef.GUID()
@@ -1189,7 +901,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 	case typeDef.IsRuntimeClass():
 		// Static only classes carry the abstract flag.
 		// These cannot be instantiated so no signature needed.
-		if typeDef.Flags.Abstract() {
+		if (typeDef.Flags & flags.TypeAttributes_Abstract != 0) {
 			return "", nil
 		}
 
@@ -1221,40 +933,40 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf(`rc(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, defaultInterfaceSignature), nil
+		return fmt.Sprintf(`rc(%s;%s)`, typeDef.Namespace.String()+"."+typeDef.Name.String(), defaultInterfaceSignature), nil
 	default:
-		return "", fmt.Errorf("unsupported type: %v", typeDef.TypeName)
+		return "", fmt.Errorf("unsupported type: %v", typeDef.Name.String())
 	}
 }
 
-func primitiveTypeSignature(kind types.ElementTypeKind) string {
+func primitiveTypeSignature(kind flags.ElementType) string {
 	switch kind {
 	// Fundamental types
-	case types.ELEMENT_TYPE_U1:
+	case flags.ElementType_U1:
 		return winrt.SignatureUInt8
-	case types.ELEMENT_TYPE_U2:
+	case flags.ElementType_U2:
 		return winrt.SignatureUInt16
-	case types.ELEMENT_TYPE_U4:
+	case flags.ElementType_U4:
 		return winrt.SignatureUInt32
-	case types.ELEMENT_TYPE_U8:
+	case flags.ElementType_U8:
 		return winrt.SignatureUInt64
-	case types.ELEMENT_TYPE_I1:
+	case flags.ElementType_I1:
 		return winrt.SignatureInt8
-	case types.ELEMENT_TYPE_I2:
+	case flags.ElementType_I2:
 		return winrt.SignatureInt16
-	case types.ELEMENT_TYPE_I4:
+	case flags.ElementType_I4:
 		return winrt.SignatureInt32
-	case types.ELEMENT_TYPE_I8:
+	case flags.ElementType_I8:
 		return winrt.SignatureInt64
-	case types.ELEMENT_TYPE_R4:
+	case flags.ElementType_R4:
 		return winrt.SignatureFloat32
-	case types.ELEMENT_TYPE_R8:
+	case flags.ElementType_R8:
 		return winrt.SignatureFloat64
-	case types.ELEMENT_TYPE_BOOLEAN:
+	case flags.ElementType_BOOLEAN:
 		return winrt.SignatureBool
-	case types.ELEMENT_TYPE_CHAR:
+	case flags.ElementType_CHAR:
 		return winrt.SignatureChar
-	case types.ELEMENT_TYPE_STRING:
+	case flags.ElementType_STRING:
 		return winrt.SignatureString
 	}
 	return ""

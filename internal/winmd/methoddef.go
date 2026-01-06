@@ -30,16 +30,8 @@ func GetMethodOverloadName(ctx *winmd.Metadata, methodDef *winmd.MethodDef) stri
 			continue
 		}
 		
-		// Compare signatures
-		parentSig, err := ctx.Blob.Bytes(parentMethodDef.Signature)
-		if err != nil {
-			continue
-		}
-		methodSig, err := ctx.Blob.Bytes(methodDef.Signature)
-		if err != nil {
-			continue
-		}
-		if string(parentSig) != string(methodSig) {
+		// Compare signatures (Signature is already a []byte, not a blob index)
+		if string(parentMethodDef.Signature) != string(methodDef.Signature) {
 			continue
 		}
 
@@ -65,12 +57,9 @@ func GetMethodOverloadName(ctx *winmd.Metadata, methodDef *winmd.MethodDef) stri
 			continue
 		}
 
-		if attrTypeRef.TypeNamespace.String()+"."+attrTypeRef.TypeName.String() == AttributeTypeOverloadAttribute {
-			// Get the attribute value from blob
-			valueBlob, err := ctx.Blob.Bytes(cAttr.Value)
-			if err != nil {
-				continue
-			}
+		if attrTypeRef.Namespace.String()+"."+attrTypeRef.Name.String() == AttributeTypeOverloadAttribute {
+			// cAttr.Value is already a []byte, not a blob index
+			valueBlob := cAttr.Value
 			
 			// Metadata values start with 0x01 0x00 and ends with 0x00 0x00
 			if len(valueBlob) < 4 {

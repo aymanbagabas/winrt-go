@@ -46,11 +46,8 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 			continue
 		}
 
-		// The value is a blob that we need to read as little endian
-		valueBlob, err := typeDef.Ctx().Blob.Bytes(constant.Value)
-		if err != nil {
-			return "", err
-		}
+		// The value is already a blob ([]byte), we need to read as little endian
+		valueBlob := constant.Value
 		
 		var blobIndex uint32
 		for i, b := range valueBlob {
@@ -66,11 +63,11 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte, error) {
 	result := typeDef.GetTypeDefAttributesWithType(lookupAttrTypeClass)
 	if len(result) == 0 {
-		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String(), lookupAttrTypeClass)
+		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.Namespace.String()+"."+typeDef.Name.String(), lookupAttrTypeClass)
 	} else if len(result) > 1 {
 		_ = level.Warn(typeDef.logger).Log(
 			"msg", "type has multiple custom attributes, returning the first one",
-			"type", typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String(),
+			"type", typeDef.Namespace.String()+"."+typeDef.Name.String(),
 			"attr", lookupAttrTypeClass,
 		)
 	}
@@ -110,8 +107,8 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 		}
 
 		// does the blob belong to the type we're looking for?
-		if parentTypeDef.TypeNamespace.String() != typeDef.TypeNamespace.String() || 
-		   parentTypeDef.TypeName.String() != typeDef.TypeName.String() {
+		if parentTypeDef.Namespace.String() != typeDef.Namespace.String() || 
+		   parentTypeDef.Name.String() != typeDef.Name.String() {
 			continue
 		}
 
@@ -140,12 +137,9 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 			continue
 		}
 
-		if attrTypeRef.TypeNamespace.String()+"."+attrTypeRef.TypeName.String() == lookupAttrTypeClass {
-			valueBlob, err := typeDef.Ctx().Blob.Bytes(cAttr.Value)
-			if err != nil {
-				continue
-			}
-			result = append(result, valueBlob)
+		if attrTypeRef.Namespace.String()+"."+attrTypeRef.Name.String() == lookupAttrTypeClass {
+			// cAttr.Value is already a []byte
+			result = append(result, cAttr.Value)
 		}
 	}
 
@@ -169,8 +163,8 @@ func (typeDef *TypeDef) GetImplementedInterfaces() ([]QualifiedID, error) {
 			return nil, err
 		}
 
-		if classTd.TypeNamespace.String()+"."+classTd.TypeName.String() != 
-		   typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String() {
+		if classTd.Namespace.String()+"."+classTd.Name.String() != 
+		   typeDef.Namespace.String()+"."+typeDef.Name.String() {
 			// not the class we are looking for
 			continue
 		}
@@ -189,16 +183,16 @@ func (typeDef *TypeDef) GetImplementedInterfaces() ([]QualifiedID, error) {
 			if err != nil {
 				return nil, err
 			}
-			ifaceNS = iface.TypeNamespace.String()
-			ifaceName = iface.TypeName.String()
+			ifaceNS = iface.Namespace.String()
+			ifaceName = iface.Name.String()
 		} else if interfaceImpl.Interface.Tag == 1 {
 			// TypeRef
 			iface, err := typeDef.Ctx().Tables.TypeRef.Record(interfaceImpl.Interface.Index)
 			if err != nil {
 				return nil, err
 			}
-			ifaceNS = iface.TypeNamespace.String()
-			ifaceName = iface.TypeName.String()
+			ifaceNS = iface.Namespace.String()
+			ifaceName = iface.Name.String()
 		}
 
 		interfaces = append(interfaces, QualifiedID{Namespace: ifaceNS, Name: ifaceName})
@@ -219,16 +213,16 @@ func (typeDef *TypeDef) Extends(class string) (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		ns = extends.TypeNamespace.String()
-		name = extends.TypeName.String()
+		ns = extends.Namespace.String()
+		name = extends.Name.String()
 	} else if typeDef.TypeDef.Extends.Tag == 1 {
 		// TypeRef
 		extends, err := typeDef.Ctx().Tables.TypeRef.Record(typeDef.TypeDef.Extends.Index)
 		if err != nil {
 			return false, err
 		}
-		ns = extends.TypeNamespace.String()
-		name = extends.TypeName.String()
+		ns = extends.Namespace.String()
+		name = extends.Name.String()
 	} else {
 		// TypeSpec or invalid
 		return false, nil
@@ -261,8 +255,8 @@ func (typeDef *TypeDef) GetGenericParams() ([]*winmd.GenericParam, error) {
 		}
 
 		// does the param belong to the type we're looking for?
-		if ownerTypeDef.TypeNamespace.String() != typeDef.TypeNamespace.String() || 
-		   ownerTypeDef.TypeName.String() != typeDef.TypeName.String() {
+		if ownerTypeDef.Namespace.String() != typeDef.Namespace.String() || 
+		   ownerTypeDef.Name.String() != typeDef.Name.String() {
 			continue
 		}
 
@@ -271,7 +265,7 @@ func (typeDef *TypeDef) GetGenericParams() ([]*winmd.GenericParam, error) {
 	
 	if len(params) == 0 {
 		return nil, fmt.Errorf("could not find generic params for type %s.%s", 
-			typeDef.TypeNamespace.String(), typeDef.TypeName.String())
+			typeDef.Namespace.String(), typeDef.Name.String())
 	}
 
 	return params, nil

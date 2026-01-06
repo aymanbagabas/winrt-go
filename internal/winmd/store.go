@@ -75,7 +75,7 @@ func (mds *Store) typeDefByNameAndCtx(class string, ctx *winmd.Metadata) *TypeDe
 			continue // keep searching instead of failing
 		}
 
-		if typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String() == class {
+		if typeDef.Namespace.String()+"."+typeDef.Name.String() == class {
 			return &TypeDef{
 				TypeDef:    typeDef,
 				HasContext: HasContext{ctx},

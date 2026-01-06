@@ -9,7 +9,6 @@ require (
 	github.com/microsoft/go-winmd v0.0.0-20240327084656-1395bb24174a
 	github.com/peterbourgon/ff/v3 v3.1.2
 	github.com/stretchr/testify v1.7.5
-	github.com/tdakkota/win32metadata v0.1.0
 	golang.org/x/sys v0.0.0-20220624220833-87e55d714810
 	golang.org/x/tools v0.1.11
 )
