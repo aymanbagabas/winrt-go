@@ -153,6 +153,10 @@ type genParamType struct {
 	IsEnum             bool
 	UnderlyingEnumType string
 
+	// GenericArgSignatures stores the WinRT type signatures for generic type arguments
+	// For example, IAsyncOperation<GattClientNotificationResult> would have one signature
+	GenericArgSignatures []string
+
 	defaultValue genDefaultValue
 }
 
@@ -198,6 +202,16 @@ func (g *genParam) GoDefaultValue() string {
 	}
 
 	return g.Type.defaultValue.value
+}
+
+// HasGenericArgs returns true if this parameter type has generic type arguments
+func (g *genParam) HasGenericArgs() bool {
+	return len(g.Type.GenericArgSignatures) > 0
+}
+
+// GenericArgSignatures returns the WinRT signatures for generic type arguments
+func (g *genParam) GenericArgSignatures() []string {
+	return g.Type.GenericArgSignatures
 }
 
 type genStruct struct {

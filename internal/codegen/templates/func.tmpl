@@ -1,5 +1,25 @@
 {{if .Implement}}
-    func {{if and .FuncOwner (not .RequiresActivation)}}
+    {{- /* Emit constants for generic return type signatures if present */ -}}
+    {{- $funcName := funcName . -}}
+    {{- range .ReturnParams -}}
+        {{- if .HasGenericArgs -}}
+            {{- $numArgs := len .GenericArgSignatures -}}
+            {{- if eq $numArgs 1 -}}
+                {{- $sig := index .GenericArgSignatures 0}}
+// {{$funcName}}ResultSignature is the WinRT signature for the generic type argument of the {{$funcName}} return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const {{$funcName}}ResultSignature string = "{{$sig}}"
+            {{- else -}}
+                {{- range $index, $sig := .GenericArgSignatures}}
+// {{$funcName}}ResultSignature{{$index}} is the WinRT signature for the {{$index}}th generic type argument of the {{$funcName}} return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const {{$funcName}}ResultSignature{{$index}} string = "{{$sig}}"
+                {{- end -}}
+            {{- end -}}
+        {{- end -}}
+    {{- end}}
+
+func {{if and .FuncOwner (not .RequiresActivation)}}
         (v *{{.FuncOwner}})
     {{- end -}}
 
