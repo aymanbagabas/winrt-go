@@ -689,22 +689,20 @@ func (g *generator) shouldImplementMethod(methodName string) bool {
 }
 
 func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeDef, methodDef *winmd.MethodDef) ([]*genParam, error) {
-
-	params, err := methodDef.ResolveParamList(typeDef.Ctx())
+	// Resolve parameter list using helper
+	params, err := ResolveParamList(typeDef.Ctx(), methodDef)
 	if err != nil {
 		return nil, err
 	}
 
-	// the signature contains the parameter
-	// types and return type of the method
-	r := methodDef.Signature.Reader()
-	mr, err := r.Method(typeDef.Ctx())
+	// Parse method signature using new API
+	methodSig, err := typeDef.Ctx().MethodDefSignature(methodDef.Signature)
 	if err != nil {
 		return nil, err
 	}
 
 	var genParams []*genParam
-	for i, e := range mr.Params {
+	for i, sigParam := range methodSig.Param {
 		param := getParamByIndex(params, uint16(i+1))
 		if param == nil {
 			_ = level.Error(g.logger).Log("msg", "Parameter with index not found", "index", i+1)
@@ -714,22 +712,22 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeD
 		// When encoding an Array parameter for any interface member type, the array length
 		// parameter that immediately precedes the array parameter is omitted from both the
 		// MethodDefSig blob as well from as the params table. => so we need to add it manually.
-		// Do not trust e.IsArray variable, it's only true for the ELEMENT_TYPE_ARRAY, it
-		if e.Type.Kind == types.ELEMENT_TYPE_SZARRAY || e.Type.Kind == types.ELEMENT_TYPE_ARRAY {
+		if sigParam.Type.Kind == flags.ElementType_SZARRAY || sigParam.Type.Kind == flags.ElementType_ARRAY {
 			// The direction of the array parameter is directly encoded in metadata.The direction of
 			// the array length parameter may be inferred as follows.
 			//   - If the array parameter is an in parameter, the array length parameter must also
 			//     be an IN PARAMETER.
 			//   - If the array parameter is an out parameter and is not carrying the BYREF
 			//     marker, the array length is an IN PARAMETER.
-
 			//   - If the array parameter is an out parameter and carries the BYREF marker, the
 			//     array length is an OUT PARAMETER.
-			sizeIsOutParam := param.Flags.Out() && e.ByRef
+			isByRef := sigParam.Kind == winmd.SigParamKind_ByRef
+			isOut := param.Flags&flags.ParamAttributes_Out != 0
+			sizeIsOutParam := isOut && isByRef
 			genParams = append(genParams, &genParam{
 				callerPackage: curPackage,
 				// Do not change this without also changing the code in the templates
-				varName: cleanReservedWords(param.Name + "Size"),
+				varName: cleanReservedWords(param.Name.String() + "Size"),
 				IsOut:   sizeIsOutParam,
 				Type: &genParamType{
 					namespace:    "",
@@ -742,14 +740,14 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeD
 			})
 		}
 
-		elType, err := g.elementType(typeDef.Ctx(), e)
+		elType, err := g.sigTypeToGenParamType(typeDef.Ctx(), sigParam.Type, curPackage)
 		if err != nil {
 			return nil, err
 		}
 		genParams = append(genParams, &genParam{
 			callerPackage: curPackage,
 			varName:       cleanReservedWords(getParamName(params, uint16(i+1))),
-			IsOut:         param.Flags.Out(),
+			IsOut:         param.Flags&flags.ParamAttributes_Out != 0,
 			Type:          elType,
 		})
 	}
@@ -758,10 +756,8 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeD
 }
 
 func (g *generator) getReturnParameters(curPackage string, typeDef *winmdLocal.TypeDef, methodDef *winmd.MethodDef) ([]*genParam, error) {
-	// the signature contains the parameter
-	// types and return type of the method
-	r := methodDef.Signature.Reader()
-	methodSignature, err := r.Method(typeDef.Ctx())
+	// Parse method signature using new API
+	methodSig, err := typeDef.Ctx().MethodDefSignature(methodDef.Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -769,11 +765,11 @@ func (g *generator) getReturnParameters(curPackage string, typeDef *winmdLocal.T
 	var genParams []*genParam
 
 	// ignore void types
-	if methodSignature.Return.Type.Kind == types.ELEMENT_TYPE_VOID {
+	if methodSig.RetType.Kind == winmd.SigRetTypeKind_Void {
 		return genParams, nil
 	}
 
-	elType, err := g.elementType(typeDef.Ctx(), methodSignature.Return)
+	elType, err := g.sigTypeToGenParamType(typeDef.Ctx(), methodSig.RetType.Type, curPackage)
 	if err != nil {
 		return nil, err
 	}
@@ -789,19 +785,19 @@ func (g *generator) getReturnParameters(curPackage string, typeDef *winmdLocal.T
 	return genParams, nil
 }
 
-func getParamName(params []winmd.Param, i uint16) string {
+func getParamName(params []*winmd.Param, i uint16) string {
 	for _, p := range params {
 		if p.Sequence == i {
-			return p.Name
+			return p.Name.String()
 		}
 	}
 	return fmt.Sprintf("__ERROR_PARAM_%d_NOT_FOUND__", i)
 }
 
-func getParamByIndex(params []winmd.Param, i uint16) *winmd.Param {
+func getParamByIndex(params []*winmd.Param, i uint16) *winmd.Param {
 	for _, p := range params {
 		if p.Sequence == i {
-			return &p
+			return p
 		}
 	}
 	return nil
@@ -846,12 +842,12 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fieldSig, err := fields[0].Signature.Reader().Field(typeDef.Ctx())
+		fieldSig, err := typeDef.Ctx().FieldSignature(fields[0].Signature)
 		if err != nil {
 			return "", err
 		}
 
-		enumType := primitiveTypeSignature(fieldSig.Field.Type.Kind)
+		enumType := primitiveTypeSignature(fieldSig.Type.Kind)
 		return fmt.Sprintf(`enum(%s;%s)`, typeDef.Namespace.String()+"."+typeDef.Name.String(), enumType), nil
 	case typeDef.IsStruct():
 		// struct_signature => "struct(" struct_name ";" args ")"
@@ -861,15 +857,15 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		}
 		structArgs := []string{}
 		for _, f := range fields {
-			fSig, err := f.Signature.Reader().Field(typeDef.Ctx())
+			fSig, err := typeDef.Ctx().FieldSignature(f.Signature)
 			if err != nil {
 				return "", err
 			}
 
 			// Struct fields must be fundamental types, enums, or other structs
-			if fSig.Field.Type.Kind == types.ELEMENT_TYPE_VALUETYPE {
+			if fSig.Type.Kind == flags.ElementType_VALUETYPE {
 				// this is an struct or an enum
-				fieldType, err := g.elementType(typeDef.Ctx(), fSig.Field)
+				fieldType, err := g.sigTypeToGenParamType(typeDef.Ctx(), fSig.Type, "")
 				if err != nil {
 					return "", err
 				}
@@ -886,7 +882,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 				structArgs = append(structArgs, sig)
 			} else {
 				// Assume everything else is a fundamental type
-				structArgs = append(structArgs, primitiveTypeSignature(fSig.Field.Type.Kind))
+				structArgs = append(structArgs, primitiveTypeSignature(fSig.Type.Kind))
 			}
 		}
 		return fmt.Sprintf(`struct(%s;%s)`, typeDef.Namespace.String()+"."+typeDef.Name.String(), strings.Join(structArgs, ";")), nil

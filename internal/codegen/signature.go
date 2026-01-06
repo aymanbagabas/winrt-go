@@ -7,6 +7,23 @@ import (
 	"github.com/microsoft/go-winmd/flags"
 )
 
+// ResolveParamList resolves the ParamList for a MethodDef
+func ResolveParamList(ctx *winmd.Metadata, methodDef *winmd.MethodDef) ([]*winmd.Param, error) {
+	if methodDef.ParamList.Start == methodDef.ParamList.End {
+		return nil, nil
+	}
+
+	result := make([]*winmd.Param, 0, methodDef.ParamList.End-methodDef.ParamList.Start)
+	for i := methodDef.ParamList.Start; i < methodDef.ParamList.End; i++ {
+		param, err := ctx.Tables.Param.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, param)
+	}
+	return result, nil
+}
+
 // sigTypeToGenParamType converts a winmd.SigType to a genParamType
 func (g *generator) sigTypeToGenParamType(ctx *winmd.Metadata, sigType winmd.SigType, curPackage string) (*genParamType, error) {
 	switch sigType.Kind {

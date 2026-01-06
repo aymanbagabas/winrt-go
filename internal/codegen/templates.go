@@ -38,7 +38,7 @@ func (g *genData) ComputeImports(typeDef *winmd.TypeDef) {
 	}
 
 	for _, i := range imports {
-		if typeDef.TypeNamespace != i.Namespace {
+		if typeDef.Namespace.String() != i.Namespace {
 			g.Imports = append(g.Imports, i.ToGoImport())
 		}
 	}
