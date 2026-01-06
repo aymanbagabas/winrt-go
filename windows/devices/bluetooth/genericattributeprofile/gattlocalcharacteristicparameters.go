@@ -283,6 +283,10 @@ func (v *iGattLocalCharacteristicParameters) GetUserDescription() (string, error
 	return out, nil
 }
 
+// GetPresentationFormatsResultSignature is the WinRT signature for the generic type argument of the GetPresentationFormats return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetPresentationFormatsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattPresentationFormat;{196d0021-faad-45dc-ae5b-2ac3184e84db})"
+
 func (v *iGattLocalCharacteristicParameters) GetPresentationFormats() (*collections.IVector, error) {
 	var out *collections.IVector
 	hr, _, _ := syscall.SyscallN(

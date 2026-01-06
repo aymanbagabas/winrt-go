@@ -930,7 +930,7 @@ func (g *generator) elementType(ctx *types.Context, e types.Element) (*genParamT
 		}
 
 		// Extract signatures for generic type arguments
-		var genericArgSignatures []string
+		var allGenericArgSignatures []string
 		for _, genericArgType := range e.Type.TypeDef.Generics {
 			// Convert ElementType to Element for signature generation
 			genericArg := types.Element{Type: genericArgType}
@@ -940,10 +940,17 @@ func (g *generator) elementType(ctx *types.Context, e types.Element) (*genParamT
 				return nil, fmt.Errorf("failed to get signature for generic argument: %w", err)
 			}
 			_ = level.Debug(g.logger).Log("msg", "extracted generic arg signature", "type", namespace+"."+name, "argSignature", argSignature)
-			// Skip signatures that are themselves parameterized interfaces
-			// We only want the actual type argument signatures, not nested generic instantiations
-			if !strings.HasPrefix(argSignature, "pinterface(") {
-				genericArgSignatures = append(genericArgSignatures, argSignature)
+			allGenericArgSignatures = append(allGenericArgSignatures, argSignature)
+		}
+		
+		// Filter out pinterface signatures and empty signatures
+		// We only want the actual type argument signatures.
+		// In some cases, the metadata contains both the full generic instantiation signature
+		// and the individual type argument signatures. We want only the latter.
+		var genericArgSignatures []string
+		for _, sig := range allGenericArgSignatures {
+			if sig != "" && !strings.HasPrefix(sig, "pinterface(") {
+				genericArgSignatures = append(genericArgSignatures, sig)
 			}
 		}
 
@@ -1165,8 +1172,9 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 		return "cinterface(IInspectable)", nil
 	case types.ELEMENT_TYPE_VAR:
 		// This represents a generic type parameter (T, TResult, etc.)
-		// We can't resolve this without the instantiation context
-		return "", fmt.Errorf("ELEMENT_TYPE_VAR (generic type parameter) cannot be resolved without instantiation context")
+		// When generating the definition of a generic type itself, we can't resolve the type parameter
+		// Just return an empty string - this will be filtered out
+		return "", nil
 	case types.ELEMENT_TYPE_GENERICINST:
 		// For generic instantiations, we need to generate a parameterized instance signature
 		// Format: pinterface({base-guid};arg1-sig;arg2-sig;...)
@@ -1220,6 +1228,11 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
 		if err != nil {
 			return "", err
+		}
+
+		// Handle built-in types that might not be in the metadata
+		if namespace == "System" && name == "Guid" {
+			return winrt.SignatureGUID, nil
 		}
 
 		typeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)

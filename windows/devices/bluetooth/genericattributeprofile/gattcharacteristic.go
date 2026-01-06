@@ -146,6 +146,10 @@ func (v *iGattCharacteristic) GetUuid() (syscall.GUID, error) {
 	return out, nil
 }
 
+// ReadValueAsyncResultSignature is the WinRT signature for the generic type argument of the ReadValueAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const ReadValueAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattReadResult;{63a66f08-1aea-4c4c-a50f-97bae474b348})"
+
 func (v *iGattCharacteristic) ReadValueAsync() (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -160,6 +164,10 @@ func (v *iGattCharacteristic) ReadValueAsync() (*foundation.IAsyncOperation, err
 
 	return out, nil
 }
+
+// ReadValueWithCacheModeAsyncResultSignature is the WinRT signature for the generic type argument of the ReadValueWithCacheModeAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const ReadValueWithCacheModeAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattReadResult;{63a66f08-1aea-4c4c-a50f-97bae474b348})"
 
 func (v *iGattCharacteristic) ReadValueWithCacheModeAsync(cacheMode bluetooth.BluetoothCacheMode) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
@@ -177,6 +185,10 @@ func (v *iGattCharacteristic) ReadValueWithCacheModeAsync(cacheMode bluetooth.Bl
 	return out, nil
 }
 
+// WriteValueAsyncResultSignature is the WinRT signature for the generic type argument of the WriteValueAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const WriteValueAsyncResultSignature string = "enum(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus;i4)"
+
 func (v *iGattCharacteristic) WriteValueAsync(value *streams.IBuffer) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -192,6 +204,10 @@ func (v *iGattCharacteristic) WriteValueAsync(value *streams.IBuffer) (*foundati
 
 	return out, nil
 }
+
+// WriteValueWithOptionAsyncResultSignature is the WinRT signature for the generic type argument of the WriteValueWithOptionAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const WriteValueWithOptionAsyncResultSignature string = "enum(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus;i4)"
 
 func (v *iGattCharacteristic) WriteValueWithOptionAsync(value *streams.IBuffer, writeOption GattWriteOption) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
@@ -209,6 +225,10 @@ func (v *iGattCharacteristic) WriteValueWithOptionAsync(value *streams.IBuffer, 
 
 	return out, nil
 }
+
+// WriteClientCharacteristicConfigurationDescriptorAsyncResultSignature is the WinRT signature for the generic type argument of the WriteClientCharacteristicConfigurationDescriptorAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const WriteClientCharacteristicConfigurationDescriptorAsyncResultSignature string = "enum(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus;i4)"
 
 func (v *iGattCharacteristic) WriteClientCharacteristicConfigurationDescriptorAsync(clientCharacteristicConfigurationDescriptorValue GattClientCharacteristicConfigurationDescriptorValue) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation

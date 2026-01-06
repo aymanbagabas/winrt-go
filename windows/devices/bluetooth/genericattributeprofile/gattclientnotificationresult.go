@@ -96,6 +96,10 @@ func (v *iGattClientNotificationResult) GetStatus() (GattCommunicationStatus, er
 	return out, nil
 }
 
+// GetProtocolErrorResultSignature is the WinRT signature for the generic type argument of the GetProtocolError return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetProtocolErrorResultSignature string = "u1"
+
 func (v *iGattClientNotificationResult) GetProtocolError() (*foundation.IReference, error) {
 	var out *foundation.IReference
 	hr, _, _ := syscall.SyscallN(

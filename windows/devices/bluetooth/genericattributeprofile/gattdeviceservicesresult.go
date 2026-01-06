@@ -67,6 +67,10 @@ func (v *iGattDeviceServicesResult) GetStatus() (GattCommunicationStatus, error)
 	return out, nil
 }
 
+// GetServicesResultSignature is the WinRT signature for the generic type argument of the GetServices return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetServicesResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattDeviceService;{ac7b7c05-b33c-47cf-990f-6b8f5577df71})"
+
 func (v *iGattDeviceServicesResult) GetServices() (*collections.IVectorView, error) {
 	var out *collections.IVectorView
 	hr, _, _ := syscall.SyscallN(

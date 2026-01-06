@@ -75,6 +75,10 @@ func (v *iGattLocalService) GetUuid() (syscall.GUID, error) {
 	return out, nil
 }
 
+// CreateCharacteristicAsyncResultSignature is the WinRT signature for the generic type argument of the CreateCharacteristicAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const CreateCharacteristicAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattLocalCharacteristicResult;{7975de9b-0170-4397-9666-92f863f12ee6})"
+
 func (v *iGattLocalService) CreateCharacteristicAsync(characteristicUuid syscall.GUID, parameters *GattLocalCharacteristicParameters) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -91,6 +95,10 @@ func (v *iGattLocalService) CreateCharacteristicAsync(characteristicUuid syscall
 
 	return out, nil
 }
+
+// GetCharacteristicsResultSignature is the WinRT signature for the generic type argument of the GetCharacteristics return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetCharacteristicsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattLocalCharacteristic;{aede376d-5412-4d74-92a8-8deb8526829c})"
 
 func (v *iGattLocalService) GetCharacteristics() (*collections.IVectorView, error) {
 	var out *collections.IVectorView

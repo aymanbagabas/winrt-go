@@ -201,6 +201,10 @@ func (v *iGattSessionStatics) VTable() *iGattSessionStaticsVtbl {
 	return (*iGattSessionStaticsVtbl)(unsafe.Pointer(v.RawVTable))
 }
 
+// GattSessionFromDeviceIdAsyncResultSignature is the WinRT signature for the generic type argument of the GattSessionFromDeviceIdAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GattSessionFromDeviceIdAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattSession;{d23b5143-e04e-4c24-999c-9c256f9856b1})"
+
 func GattSessionFromDeviceIdAsync(deviceId *bluetooth.BluetoothDeviceId) (*foundation.IAsyncOperation, error) {
 	inspectable, err := ole.RoGetActivationFactory("Windows.Devices.Bluetooth.GenericAttributeProfile.GattSession", ole.NewGUID(GUIDiGattSessionStatics))
 	if err != nil {
