@@ -944,9 +944,13 @@ func (g *generator) elementType(ctx *types.Context, e types.Element) (*genParamT
 		}
 		
 		// Filter out pinterface signatures and empty signatures
-		// We only want the actual type argument signatures.
+		// We only want the actual type argument signatures (e.g., "rc(...)" or "enum(...)"), 
+		// not the full parameterized interface signatures (e.g., "pinterface({guid};...)").
 		// In some cases, the metadata contains both the full generic instantiation signature
-		// and the individual type argument signatures. We want only the latter.
+		// and the individual type argument signatures. For our use case (calling 
+		// ParameterizedInstanceGUID), we need only the individual type arguments.
+		// Example: For IAsyncOperation<GattResult>, we want "rc(GattResult;{...})" 
+		// not "pinterface({IAsyncOperation-guid};rc(GattResult;{...}))".
 		var genericArgSignatures []string
 		for _, sig := range allGenericArgSignatures {
 			if sig != "" && !strings.HasPrefix(sig, "pinterface(") {
@@ -1176,9 +1180,11 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 		// Just return an empty string - this will be filtered out
 		return "", nil
 	case types.ELEMENT_TYPE_GENERICINST:
-		// For generic instantiations, we need to generate a parameterized instance signature
+		// For generic instantiations, we need to generate a parameterized instance signature.
 		// Format: pinterface({base-guid};arg1-sig;arg2-sig;...)
-		// This is the signature, NOT the final GUID
+		// NOTE: This method returns the FULL signature including pinterface wrapper.
+		// The caller (elementType) will filter these out when extracting generic arguments,
+		// but this method still needs to generate them for cases where the full signature is needed.
 		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
 		if err != nil {
 			return "", err
@@ -1196,7 +1202,7 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 			return "", err
 		}
 
-		// Get signatures for all generic arguments
+		// Get signatures for all generic arguments (recursively)
 		var genericArgSignatures []string
 		for _, genericArgType := range e.Type.TypeDef.Generics {
 			// Convert ElementType to Element for signature generation
@@ -1209,7 +1215,7 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 		}
 
 		// Generate parameterized instance signature (not the GUID)
-		// Format: pinterface({base-guid};arg1-sig;arg2-sig;...)
+		// This is the signature, NOT the final GUID
 		return fmt.Sprintf("pinterface({%s};%s)", guid, strings.Join(genericArgSignatures, ";")), nil
 	case types.ELEMENT_TYPE_CLASS:
 		// For class types, get the type signature
@@ -1242,7 +1248,7 @@ func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (s
 
 		return g.Signature(typeDef)
 	default:
-		return "", fmt.Errorf("unsupported element type for signature generation: %v", e.Type.Kind)
+		return "", fmt.Errorf("unsupported element type for signature generation: %s (kind=%d)", e.Type.Kind, e.Type.Kind)
 	}
 }
 

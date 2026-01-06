@@ -11,7 +11,7 @@
 const {{$funcName}}ResultSignature string = "{{$sig}}"
             {{- else -}}
                 {{- range $index, $sig := .GenericArgSignatures}}
-// {{$funcName}}ResultSignature{{$index}} is the WinRT signature for the {{$index}}th generic type argument of the {{$funcName}} return type.
+// {{$funcName}}ResultSignature{{$index}} is the WinRT signature for generic type argument {{$index}} of the {{$funcName}} return type.
 // This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
 const {{$funcName}}ResultSignature{{$index}} string = "{{$sig}}"
                 {{- end -}}
