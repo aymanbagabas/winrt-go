@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 
-	"github.com/tdakkota/win32metadata/types"
+	"github.com/microsoft/go-winmd"
 )
 
 // Custom Attributes
@@ -22,11 +22,11 @@ const (
 
 // HasContext is a helper struct that holds the original context of a metadata element.
 type HasContext struct {
-	originalCtx *types.Context
+	originalCtx *winmd.Metadata
 }
 
 // Ctx return the original context of the element.
-func (hctx *HasContext) Ctx() *types.Context {
+func (hctx *HasContext) Ctx() *winmd.Metadata {
 	return hctx.originalCtx
 }
 

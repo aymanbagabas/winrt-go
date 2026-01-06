@@ -6,14 +6,13 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/tdakkota/win32metadata/md"
-	"github.com/tdakkota/win32metadata/types"
+	"github.com/microsoft/go-winmd"
 )
 
-// TypeDef is a helper struct that wraps types.TypeDef and stores the original context
+// TypeDef is a helper struct that wraps winmd.TypeDef and stores the original context
 // of the typeDef.
 type TypeDef struct {
-	types.TypeDef
+	*winmd.TypeDef
 	HasContext
 
 	logger log.Logger
@@ -28,26 +27,33 @@ type QualifiedID struct {
 // GetValueForEnumField returns the value of the requested enum field.
 func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) {
 	// For each Enum value definition, there is a corresponding row in the Constant table to store the integer value for the enum value.
-	tableConstants := typeDef.Ctx().Table(md.Constant)
-	for i := uint32(0); i < tableConstants.RowCount(); i++ {
-		var constant types.Constant
-		if err := constant.FromRow(tableConstants.Row(i)); err != nil {
+	tableConstants := typeDef.Ctx().Tables.Constant
+	for i := winmd.Index(0); i < winmd.Index(tableConstants.Len); i++ {
+		constant, err := tableConstants.Record(i)
+		if err != nil {
 			return "", err
 		}
 
-		if t, _ := constant.Parent.Table(); t != md.Field {
+		// Check if parent is a Field and matches our field index
+		// In the new API, we need to check the CodedIndex Tag to determine the table type
+		// Tag values for HasConstant: Field=0, Param=1, Property=2 (from coded.go)
+		if constant.Parent.Tag != 0 { // 0 = Field
 			continue
 		}
 
 		// does the blob belong to the field we're looking for?
-		// The parent is an index into the field table that holds the associated enum value record
-		if constant.Parent.TableIndex() != fieldIndex {
+		if uint32(constant.Parent.Index) != fieldIndex {
 			continue
 		}
 
 		// The value is a blob that we need to read as little endian
+		valueBlob, err := typeDef.Ctx().Blob.Bytes(constant.Value)
+		if err != nil {
+			return "", err
+		}
+		
 		var blobIndex uint32
-		for i, b := range constant.Value {
+		for i, b := range valueBlob {
 			blobIndex += uint32(b) << (i * 8)
 		}
 		return strconv.Itoa(int(blobIndex)), nil
@@ -60,11 +66,11 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte, error) {
 	result := typeDef.GetTypeDefAttributesWithType(lookupAttrTypeClass)
 	if len(result) == 0 {
-		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.TypeNamespace+"."+typeDef.TypeName, lookupAttrTypeClass)
+		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String(), lookupAttrTypeClass)
 	} else if len(result) > 1 {
 		_ = level.Warn(typeDef.logger).Log(
 			"msg", "type has multiple custom attributes, returning the first one",
-			"type", typeDef.TypeNamespace+"."+typeDef.TypeName,
+			"type", typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String(),
 			"attr", lookupAttrTypeClass,
 		)
 	}
@@ -72,68 +78,74 @@ func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte
 	return result[0], nil
 }
 
+// Helper function to get CodedIndex table type
+// Based on the codedHasCustomAttribute mapping in the new API
+func getTableTypeFromCodedIndex(codedIndex winmd.CodedIndex) int8 {
+	// For HasCustomAttribute, the table mapping is:
+	// Tag 0 = MethodDef, 1 = Field, 2 = TypeRef, 3 = TypeDef, 4 = Param, etc.
+	// We specifically need Tag 3 for TypeDef
+	return codedIndex.Tag
+}
+
 // GetTypeDefAttributesWithType returns the values of all the attributes that match the given type.
 func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string) [][]byte {
 	result := make([][]byte, 0)
-	cAttrTable := typeDef.Ctx().Table(md.CustomAttribute)
-	for i := uint32(0); i < cAttrTable.RowCount(); i++ {
-		var cAttr types.CustomAttribute
-		if err := cAttr.FromRow(cAttrTable.Row(i)); err != nil {
+	cAttrTable := typeDef.Ctx().Tables.CustomAttribute
+	
+	for i := winmd.Index(0); i < winmd.Index(cAttrTable.Len); i++ {
+		cAttr, err := cAttrTable.Record(i)
+		if err != nil {
 			continue
 		}
 
-		// - Parent: The owner of the Attribute must be the given typeDef
-		if cAttrParentTable, _ := cAttr.Parent.Table(); cAttrParentTable != md.TypeDef {
+		// Parent: The owner of the Attribute must be the given typeDef (Tag 3 = TypeDef in HasCustomAttribute)
+		if cAttr.Parent.Tag != 3 {
 			continue
 		}
 
-		var parentTypeDef TypeDef
-		row, ok := cAttr.Parent.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := parentTypeDef.FromRow(row); err != nil {
+		// Get the parent TypeDef
+		parentTypeDef, err := typeDef.Ctx().Tables.TypeDef.Record(cAttr.Parent.Index)
+		if err != nil {
 			continue
 		}
 
 		// does the blob belong to the type we're looking for?
-		if parentTypeDef.TypeNamespace != typeDef.TypeNamespace || parentTypeDef.TypeName != typeDef.TypeName {
+		if parentTypeDef.TypeNamespace.String() != typeDef.TypeNamespace.String() || 
+		   parentTypeDef.TypeName.String() != typeDef.TypeName.String() {
 			continue
 		}
 
-		// - Type: the attribute type must be the given type
-		// the cAttr.Type table can be either a MemberRef or a MethodRef.
-		// Since we are looking for a type, we will only consider the MemberRef.
-		if cAttrTypeTable, _ := cAttr.Type.Table(); cAttrTypeTable != md.MemberRef {
+		// Type: the attribute type must be the given type
+		// cAttr.Type is CustomAttributeType coded index
+		// Tag values: 0,1 = none, 2 = MethodDef, 3 = MemberRef, 4 = none
+		// We want MemberRef (Tag 3)
+		if cAttr.Type.Tag != 3 {
 			continue
 		}
 
-		var attrTypeMemberRef types.MemberRef
-		row, ok = cAttr.Type.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := attrTypeMemberRef.FromRow(row); err != nil {
+		attrTypeMemberRef, err := typeDef.Ctx().Tables.MemberRef.Record(cAttr.Type.Index)
+		if err != nil {
 			continue
 		}
 
-		// we need to check the MemberRef Class
-		// the value can belong to several tables, but we are only going to check for TypeRef
-		if classTable, _ := attrTypeMemberRef.Class.Table(); classTable != md.TypeRef {
+		// Check the MemberRef Class
+		// For MemberRefParent: Tag 0 = TypeDef, 1 = TypeRef, 2 = ModuleRef, 3 = MethodDef, 4 = TypeSpec
+		// We want TypeRef (Tag 1)
+		if attrTypeMemberRef.Class.Tag != 1 {
 			continue
 		}
 
-		var attrTypeRef types.TypeRef
-		row, ok = attrTypeMemberRef.Class.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := attrTypeRef.FromRow(row); err != nil {
+		attrTypeRef, err := typeDef.Ctx().Tables.TypeRef.Record(attrTypeMemberRef.Class.Index)
+		if err != nil {
 			continue
 		}
 
-		if attrTypeRef.TypeNamespace+"."+attrTypeRef.TypeName == lookupAttrTypeClass {
-			result = append(result, cAttr.Value)
+		if attrTypeRef.TypeNamespace.String()+"."+attrTypeRef.TypeName.String() == lookupAttrTypeClass {
+			valueBlob, err := typeDef.Ctx().Blob.Bytes(cAttr.Value)
+			if err != nil {
+				continue
+			}
+			result = append(result, valueBlob)
 		}
 	}
 
@@ -144,31 +156,49 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 func (typeDef *TypeDef) GetImplementedInterfaces() ([]QualifiedID, error) {
 	interfaces := make([]QualifiedID, 0)
 
-	tableInterfaceImpl := typeDef.Ctx().Table(md.InterfaceImpl)
-	for i := uint32(0); i < tableInterfaceImpl.RowCount(); i++ {
-		var interfaceImpl types.InterfaceImpl
-		if err := interfaceImpl.FromRow(tableInterfaceImpl.Row(i)); err != nil {
-			return nil, err
-		}
-
-		classTd, err := interfaceImpl.ResolveClass(typeDef.Ctx())
+	tableInterfaceImpl := typeDef.Ctx().Tables.InterfaceImpl
+	for i := winmd.Index(0); i < winmd.Index(tableInterfaceImpl.Len); i++ {
+		interfaceImpl, err := tableInterfaceImpl.Record(i)
 		if err != nil {
 			return nil, err
 		}
 
-		if classTd.TypeNamespace+"."+classTd.TypeName != typeDef.TypeNamespace+"."+typeDef.TypeName {
+		// Get the class TypeDef
+		classTd, err := typeDef.Ctx().Tables.TypeDef.Record(interfaceImpl.Class)
+		if err != nil {
+			return nil, err
+		}
+
+		if classTd.TypeNamespace.String()+"."+classTd.TypeName.String() != 
+		   typeDef.TypeNamespace.String()+"."+typeDef.TypeName.String() {
 			// not the class we are looking for
 			continue
 		}
 
-		if t, ok := interfaceImpl.Interface.Table(); ok && t == md.TypeSpec {
-			// ignore type spec rows
+		// Interface is TypeDefOrRef coded index
+		// Tag 0 = TypeDef, 1 = TypeRef, 2 = TypeSpec
+		// Ignore TypeSpec (Tag 2)
+		if interfaceImpl.Interface.Tag == 2 {
 			continue
 		}
 
-		ifaceNS, ifaceName, err := typeDef.Ctx().ResolveTypeDefOrRefName(interfaceImpl.Interface)
-		if err != nil {
-			return nil, err
+		var ifaceNS, ifaceName string
+		if interfaceImpl.Interface.Tag == 0 {
+			// TypeDef
+			iface, err := typeDef.Ctx().Tables.TypeDef.Record(interfaceImpl.Interface.Index)
+			if err != nil {
+				return nil, err
+			}
+			ifaceNS = iface.TypeNamespace.String()
+			ifaceName = iface.TypeName.String()
+		} else if interfaceImpl.Interface.Tag == 1 {
+			// TypeRef
+			iface, err := typeDef.Ctx().Tables.TypeRef.Record(interfaceImpl.Interface.Index)
+			if err != nil {
+				return nil, err
+			}
+			ifaceNS = iface.TypeNamespace.String()
+			ifaceName = iface.TypeName.String()
 		}
 
 		interfaces = append(interfaces, QualifiedID{Namespace: ifaceNS, Name: ifaceName})
@@ -179,46 +209,69 @@ func (typeDef *TypeDef) GetImplementedInterfaces() ([]QualifiedID, error) {
 
 // Extends returns true if the type extends the given class
 func (typeDef *TypeDef) Extends(class string) (bool, error) {
-	ns, name, err := typeDef.Ctx().ResolveTypeDefOrRefName(typeDef.TypeDef.Extends)
-	if err != nil {
-		return false, err
+	// Extends is a TypeDefOrRef coded index
+	// Tag 0 = TypeDef, 1 = TypeRef, 2 = TypeSpec
+	var ns, name string
+	
+	if typeDef.TypeDef.Extends.Tag == 0 {
+		// TypeDef
+		extends, err := typeDef.Ctx().Tables.TypeDef.Record(typeDef.TypeDef.Extends.Index)
+		if err != nil {
+			return false, err
+		}
+		ns = extends.TypeNamespace.String()
+		name = extends.TypeName.String()
+	} else if typeDef.TypeDef.Extends.Tag == 1 {
+		// TypeRef
+		extends, err := typeDef.Ctx().Tables.TypeRef.Record(typeDef.TypeDef.Extends.Index)
+		if err != nil {
+			return false, err
+		}
+		ns = extends.TypeNamespace.String()
+		name = extends.TypeName.String()
+	} else {
+		// TypeSpec or invalid
+		return false, nil
 	}
+	
 	return ns+"."+name == class, nil
 }
 
 // GetGenericParams returns the generic parameters of the type.
-func (typeDef *TypeDef) GetGenericParams() ([]*types.GenericParam, error) {
-	params := make([]*types.GenericParam, 0)
-	tableGenericParam := typeDef.Ctx().Table(md.GenericParam)
-	for i := uint32(0); i < tableGenericParam.RowCount(); i++ {
-		var genericParam types.GenericParam
-		if err := genericParam.FromRow(tableGenericParam.Row(i)); err != nil {
+func (typeDef *TypeDef) GetGenericParams() ([]*winmd.GenericParam, error) {
+	params := make([]*winmd.GenericParam, 0)
+	tableGenericParam := typeDef.Ctx().Tables.GenericParam
+	
+	for i := winmd.Index(0); i < winmd.Index(tableGenericParam.Len); i++ {
+		genericParam, err := tableGenericParam.Record(i)
+		if err != nil {
 			continue
 		}
 
-		// - Owner: The owner of the Attribute must be the given typeDef
-		if genericParamOwnerTable, _ := genericParam.Owner.Table(); genericParamOwnerTable != md.TypeDef {
+		// Owner is TypeOrMethodDef coded index
+		// Tag 0 = TypeDef, 1 = MethodDef
+		// We want TypeDef (Tag 0)
+		if genericParam.Owner.Tag != 0 {
 			continue
 		}
 
-		var ownerTypeDef types.TypeDef
-		row, ok := genericParam.Owner.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := ownerTypeDef.FromRow(row); err != nil {
+		ownerTypeDef, err := typeDef.Ctx().Tables.TypeDef.Record(genericParam.Owner.Index)
+		if err != nil {
 			continue
 		}
 
-		// does the blob belong to the type we're looking for?
-		if ownerTypeDef.TypeNamespace != typeDef.TypeNamespace || ownerTypeDef.TypeName != typeDef.TypeName {
+		// does the param belong to the type we're looking for?
+		if ownerTypeDef.TypeNamespace.String() != typeDef.TypeNamespace.String() || 
+		   ownerTypeDef.TypeName.String() != typeDef.TypeName.String() {
 			continue
 		}
 
-		params = append(params, &genericParam)
+		params = append(params, genericParam)
 	}
+	
 	if len(params) == 0 {
-		return nil, fmt.Errorf("could not find generic params for type %s.%s", typeDef.TypeNamespace, typeDef.TypeName)
+		return nil, fmt.Errorf("could not find generic params for type %s.%s", 
+			typeDef.TypeNamespace.String(), typeDef.TypeName.String())
 	}
 
 	return params, nil
@@ -226,7 +279,9 @@ func (typeDef *TypeDef) GetGenericParams() ([]*types.GenericParam, error) {
 
 // IsInterface returns true if the type is an interface
 func (typeDef *TypeDef) IsInterface() bool {
-	return typeDef.Flags.Interface()
+	// Check Flags field for Interface flag
+	// TypeAttributes.Interface = 0x00000020
+	return typeDef.Flags&0x00000020 != 0
 }
 
 // IsEnum returns true if the type is an enum
@@ -241,7 +296,13 @@ func (typeDef *TypeDef) IsEnum() bool {
 
 // IsDelegate returns true if the type is a delegate
 func (typeDef *TypeDef) IsDelegate() bool {
-	if !(typeDef.Flags.Public() && typeDef.Flags.Sealed()) {
+	// Check for Public and Sealed flags
+	// TypeAttributes.Public = 0x00000001
+	// TypeAttributes.Sealed = 0x00000100
+	isPublic := typeDef.Flags&0x00000007 == 0x00000001 // Visibility mask
+	isSealed := typeDef.Flags&0x00000100 != 0
+	
+	if !(isPublic && isSealed) {
 		return false
 	}
 
@@ -267,7 +328,16 @@ func (typeDef *TypeDef) IsStruct() bool {
 // IsRuntimeClass returns true if the type is a runtime class
 func (typeDef *TypeDef) IsRuntimeClass() bool {
 	// Flags: all runtime classes must carry the public, auto layout, class, and tdWindowsRuntime flags.
-	return typeDef.Flags.Public() && typeDef.Flags.AutoLayout() && typeDef.Flags.Class() && typeDef.Flags&0x4000 != 0
+	// TypeAttributes.Public = 0x00000001 (visibility mask 0x00000007)
+	// TypeAttributes.AutoLayout = 0x00000000 (layout mask 0x00000018)
+	// TypeAttributes.Class = 0x00000000 (not interface, so bit 0x00000020 is not set)
+	// TypeAttributes.WindowsRuntime = 0x00004000
+	isPublic := typeDef.Flags&0x00000007 == 0x00000001
+	isAutoLayout := typeDef.Flags&0x00000018 == 0x00000000
+	isClass := typeDef.Flags&0x00000020 == 0x00000000
+	isWindowsRuntime := typeDef.Flags&0x00004000 != 0
+	
+	return isPublic && isAutoLayout && isClass && isWindowsRuntime
 }
 
 // GUID returns the GUID of the type.
@@ -280,7 +350,7 @@ func (typeDef *TypeDef) GUID() (string, error) {
 }
 
 // guidBlobToString converts an array into the textual representation of a GUID
-func guidBlobToString(b types.Blob) (string, error) {
+func guidBlobToString(b []byte) (string, error) {
 	// the guid is a blob of 20 bytes
 	if len(b) != 20 {
 		return "", fmt.Errorf("invalid GUID blob length: %d", len(b))

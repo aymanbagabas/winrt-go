@@ -6,6 +6,7 @@ require (
 	github.com/glerchundi/subcommands v0.0.0-20181212083838-923a6ccb11f8
 	github.com/go-kit/log v0.2.1
 	github.com/go-ole/go-ole v1.2.6
+	github.com/microsoft/go-winmd v0.0.0-20240327084656-1395bb24174a
 	github.com/peterbourgon/ff/v3 v3.1.2
 	github.com/stretchr/testify v1.7.5
 	github.com/tdakkota/win32metadata v0.1.0
