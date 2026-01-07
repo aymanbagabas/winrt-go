@@ -19,8 +19,8 @@ func stripGenericInstFromBlob(blob []byte) []byte {
 	needsProcessing := false
 	for _, b := range blob {
 		if b == byte(flags.ElementType_GENERICINST) || 
-		   b == byte(flags.ElementType_VAR) || 
-		   b == byte(flags.ElementType_MVAR) {
+		   b == 0x13 ||  // VAR
+		   b == 0x1E {   // MVAR
 			needsProcessing = true
 			break
 		}
@@ -37,9 +37,9 @@ func stripGenericInstFromBlob(blob []byte) []byte {
 	for i < len(blob) {
 		b := blob[i]
 		
-		if b == byte(flags.ElementType_VAR) || b == byte(flags.ElementType_MVAR) {
+		if b == 0x13 || b == 0x1E { // VAR or MVAR
 			// Replace VAR/MVAR with OBJECT (0x1C)
-			result = append(result, byte(flags.ElementType_OBJECT))
+			result = append(result, 0x1C)
 			i++
 			// Skip the generic parameter index (compressed uint) that follows VAR/MVAR
 			if i < len(blob) {
@@ -80,12 +80,12 @@ func stripGenericInstFromBlob(blob []byte) []byte {
 				elemType := blob[i]
 				i++
 				// If it's a complex type, skip its data too
-				if elemType == byte(flags.ElementType_CLASS) || elemType == byte(flags.ElementType_VALUETYPE) {
+				if elemType == 0x12 || elemType == 0x11 { // CLASS or VALUETYPE
 					if i < len(blob) {
 						_, bytesRead := readCompressedUint(blob[i:])
 						i += bytesRead
 					}
-				} else if elemType == byte(flags.ElementType_VAR) || elemType == byte(flags.ElementType_MVAR) {
+				} else if elemType == 0x13 || elemType == 0x1E { // VAR or MVAR
 					if i < len(blob) {
 						_, bytesRead := readCompressedUint(blob[i:])
 						i += bytesRead
@@ -315,6 +315,16 @@ func (g *generator) sigTypeToGenParamType(ctx *winmd.Metadata, sigType winmd.Sig
 			IsPrimitive:  true,
 			IsArray:      false,
 			defaultValue: genDefaultValue{`""`, true},
+		}, nil
+	case flags.ElementType_OBJECT:
+		// OBJECT type - generic placeholder or System.Object
+		return &genParamType{
+			namespace:    "",
+			name:         "interface{}",
+			IsPointer:    false,
+			IsPrimitive:  false,
+			IsArray:      false,
+			defaultValue: genDefaultValue{"nil", true},
 		}, nil
 	case flags.ElementType_VALUETYPE, flags.ElementType_CLASS:
 		// These require looking up the type by CodedIndex in Value
