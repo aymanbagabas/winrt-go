@@ -10,9 +10,10 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"github.com/microsoft/go-winmd"
+	"github.com/microsoft/go-winmd/flags"
 	"github.com/saltosystems/winrt-go"
-	"github.com/saltosystems/winrt-go/internal/winmd"
-	"github.com/tdakkota/win32metadata/types"
+	winmdpkg "github.com/saltosystems/winrt-go/internal/winmd"
 	"golang.org/x/tools/imports"
 )
 
@@ -30,7 +31,7 @@ type generator struct {
 
 	genDataFiles []*genDataFile
 
-	mdStore *winmd.Store
+	mdStore *winmdpkg.Store
 }
 
 // Generate generates the code for the given config.
@@ -65,12 +66,12 @@ func (g *generator) run() error {
 	return g.generate(typeDef)
 }
 
-func (g *generator) generate(typeDef *winmd.TypeDef) error {
+func (g *generator) generate(typeDef *winmdpkg.TypeDef) error {
 
 	// we only support WinRT types: check the tdWindowsRuntime flag (0x4000)
 	// https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#runtime-classes
 	if typeDef.Flags&0x4000 == 0 {
-		return fmt.Errorf("%s.%s is not a WinRT class", typeDef.TypeNamespace, typeDef.TypeName)
+		return fmt.Errorf("%s.%s is not a WinRT class", typeDef.TypeNamespace(), typeDef.TypeName)
 	}
 
 	// get data & execute templates
@@ -86,7 +87,7 @@ func (g *generator) generate(typeDef *winmd.TypeDef) error {
 	return nil
 }
 
-func (g *generator) generateDataFile(fData *genDataFile, typeDef *winmd.TypeDef) error {
+func (g *generator) generateDataFile(fData *genDataFile, typeDef *winmdpkg.TypeDef) error {
 	// get templates
 	tmpl, err := getTemplates()
 	if err != nil {
@@ -158,12 +159,12 @@ func (g *generator) writeFile(fData *genDataFile, content []byte) error {
 	return nil
 }
 
-func (g *generator) loadCodeGenData(typeDef *winmd.TypeDef) error {
+func (g *generator) loadCodeGenData(typeDef *winmdpkg.TypeDef) error {
 	f := g.addFile(typeDef, "")
 
 	switch {
 	case typeDef.IsInterface():
-		_ = level.Info(g.logger).Log("msg", "generating interface", "interface", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating interface", "interface", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 
 		if err := g.validateInterface(typeDef); err != nil {
 			return err
@@ -175,7 +176,7 @@ func (g *generator) loadCodeGenData(typeDef *winmd.TypeDef) error {
 		}
 		f.Data.Interfaces = append(f.Data.Interfaces, iface)
 	case typeDef.IsEnum():
-		_ = level.Info(g.logger).Log("msg", "generating enum", "enum", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating enum", "enum", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 
 		enum, err := g.createGenEnum(typeDef)
 		if err != nil {
@@ -183,7 +184,7 @@ func (g *generator) loadCodeGenData(typeDef *winmd.TypeDef) error {
 		}
 		f.Data.Enums = append(f.Data.Enums, enum)
 	case typeDef.IsStruct():
-		_ = level.Info(g.logger).Log("msg", "generating struct", "struct", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating struct", "struct", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 
 		genStruct, err := g.createGenStruct(typeDef)
 		if err != nil {
@@ -197,7 +198,7 @@ func (g *generator) loadCodeGenData(typeDef *winmd.TypeDef) error {
 		}
 		f.Data.Delegates = append(f.Data.Delegates, delegate)
 	default:
-		_ = level.Info(g.logger).Log("msg", "generating class", "class", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		_ = level.Info(g.logger).Log("msg", "generating class", "class", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 
 		class, err := g.createGenClass(typeDef)
 		if err != nil {
@@ -209,20 +210,20 @@ func (g *generator) loadCodeGenData(typeDef *winmd.TypeDef) error {
 	return nil
 }
 
-func (g *generator) addFile(typeDef *winmd.TypeDef, suffix string) *genDataFile {
-	folder := typeToFolder(typeDef.TypeNamespace, typeDef.TypeName)
+func (g *generator) addFile(typeDef *winmdpkg.TypeDef, suffix string) *genDataFile {
+	folder := typeToFolder(typeDef.TypeNamespace(), typeDef.TypeName)
 	filename := folder + "/" + typeFilename(typeDef.TypeName) + suffix + ".go"
 	f := genDataFile{
 		Filename: filename,
 		Data: genData{
-			Package: typePackage(typeDef.TypeNamespace, typeDef.TypeName),
+			Package: typePackage(typeDef.TypeNamespace(), typeDef.TypeName),
 		},
 	}
 	g.genDataFiles = append(g.genDataFiles, &f)
 	return &f
 }
 
-func (g *generator) validateInterface(typeDef *winmd.TypeDef) error {
+func (g *generator) validateInterface(typeDef *winmdpkg.TypeDef) error {
 	// Any WinRT interface with private visibility must have a single ExclusiveToAttribute.
 	// the ExclusiveToAttribute must reference a runtime class.
 
@@ -230,13 +231,13 @@ func (g *generator) validateInterface(typeDef *winmd.TypeDef) error {
 	// and thus will be generated when the runtime class is generated.
 
 	if typeDef.Flags.NotPublic() {
-		return fmt.Errorf("interface %s is not public", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		return fmt.Errorf("interface %s is not public", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 	}
 	return nil
 }
 
 // https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#interfaces
-func (g *generator) createGenInterface(typeDef *winmd.TypeDef, requiresActivation bool) (*genInterface, error) {
+func (g *generator) createGenInterface(typeDef *winmdpkg.TypeDef, requiresActivation bool) (*genInterface, error) {
 	funcs, err := g.getGenFuncs(typeDef, requiresActivation)
 	if err != nil {
 		return nil, err
@@ -262,9 +263,9 @@ func (g *generator) createGenInterface(typeDef *winmd.TypeDef, requiresActivatio
 }
 
 // https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#runtime-classes
-func (g *generator) createGenClass(typeDef *winmd.TypeDef) (*genClass, error) {
+func (g *generator) createGenClass(typeDef *winmdpkg.TypeDef) (*genClass, error) {
 	var requiredImports []*genImport
-	var exclusiveInterfaceTypes []*winmd.TypeDef
+	var exclusiveInterfaceTypes []*winmdpkg.TypeDef
 
 	// true => interface requires activation, false => interface is implemented by this class
 	activatedInterfaces := make(map[string]bool)
@@ -290,7 +291,7 @@ func (g *generator) createGenClass(typeDef *winmd.TypeDef) (*genClass, error) {
 		}
 
 		pkg := ""
-		if typeDef.TypeNamespace != ifaceTypeDef.TypeNamespace {
+		if typeDef.TypeNamespace() != ifaceTypeDef.TypeNamespace() {
 			pkg = typePackage(iface.Namespace, iface.Name)
 		}
 		for _, f := range itf.Funcs {
@@ -392,7 +393,7 @@ func (g *generator) createGenClass(typeDef *winmd.TypeDef) (*genClass, error) {
 		Name:                typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
 		Signature:           typeSig,
 		RequiresImports:     requiredImports,
-		FullyQualifiedName:  typeDef.TypeNamespace + "." + typeDef.TypeName,
+		FullyQualifiedName:  typeDef.TypeNamespace() + "." + typeDef.TypeName,
 		ImplInterfaces:      implInterfaces,
 		ExclusiveInterfaces: exclusiveGenInterfaces,
 		HasEmptyConstructor: hasEmptyConstructor,
@@ -401,7 +402,7 @@ func (g *generator) createGenClass(typeDef *winmd.TypeDef) (*genClass, error) {
 }
 
 // https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#enums
-func (g *generator) createGenEnum(typeDef *winmd.TypeDef) (*genEnum, error) {
+func (g *generator) createGenEnum(typeDef *winmdpkg.TypeDef) (*genEnum, error) {
 	fields, err := typeDef.ResolveFieldList(typeDef.Ctx())
 	if err != nil {
 		return nil, err
@@ -415,7 +416,7 @@ func (g *generator) createGenEnum(typeDef *winmd.TypeDef) (*genEnum, error) {
 
 	// the first row should be the underlying integer type of the enum. It must have the following flags:
 	if !(fields[0].Flags.Private() && fields[0].Flags.SpecialName() && fields[0].Flags.RTSpecialName()) {
-		return nil, fmt.Errorf("enum %s has more than one instance field, expected 1", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		return nil, fmt.Errorf("enum %s has more than one instance field, expected 1", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 	}
 
 	fieldSig, err := fields[0].Signature.Reader().Field(typeDef.Ctx())
@@ -436,7 +437,7 @@ func (g *generator) createGenEnum(typeDef *winmd.TypeDef) (*genEnum, error) {
 			return nil,
 				fmt.Errorf(
 					"enum %s field value does not comply with the spec. Checkout https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#enums",
-					typeDef.TypeNamespace+"."+typeDef.TypeName,
+					typeDef.TypeNamespace()+"."+typeDef.TypeName,
 				)
 		}
 
@@ -466,14 +467,14 @@ func (g *generator) createGenEnum(typeDef *winmd.TypeDef) (*genEnum, error) {
 }
 
 // https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#structs
-func (g *generator) createGenStruct(typeDef *winmd.TypeDef) (*genStruct, error) {
+func (g *generator) createGenStruct(typeDef *winmdpkg.TypeDef) (*genStruct, error) {
 	// structs do not have methods, only fields
 	fields, err := typeDef.ResolveFieldList(typeDef.Ctx())
 	if err != nil {
 		return nil, err
 	}
 
-	curPkg := typePackage(typeDef.TypeNamespace, typeDef.TypeName)
+	curPkg := typePackage(typeDef.TypeNamespace(), typeDef.TypeName)
 
 	var genFields []*genParam
 	for _, f := range fields {
@@ -509,7 +510,7 @@ func (g *generator) createGenStruct(typeDef *winmd.TypeDef) (*genStruct, error) 
 }
 
 // https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#delegates
-func (g *generator) createGenDelegate(typeDef *winmd.TypeDef) (*genDelegate, error) {
+func (g *generator) createGenDelegate(typeDef *winmdpkg.TypeDef) (*genDelegate, error) {
 	// FieldList: must be empty
 	// MethodList: An index into the MethodDef table (ECMA II.22.26), marking the first of a contiguous run of methods owned by this type.
 	// Delegates' TypeDef rows must have a GuidAttribute
@@ -525,7 +526,7 @@ func (g *generator) createGenDelegate(typeDef *winmd.TypeDef) (*genDelegate, err
 	}
 
 	if len(methods) != 2 {
-		return nil, fmt.Errorf("delegate %s has more than two methods", typeDef.TypeNamespace+"."+typeDef.TypeName)
+		return nil, fmt.Errorf("delegate %s has more than two methods", typeDef.TypeNamespace()+"."+typeDef.TypeName)
 	}
 
 	// This constructor is a compatibility marker. WinRT Delegates have no such constructor method.
@@ -535,7 +536,7 @@ func (g *generator) createGenDelegate(typeDef *winmd.TypeDef) (*genDelegate, err
 	if invokeMethod.Name != invokeMethodName {
 		return nil, fmt.Errorf("found method '%s' on delegate %s but expected '%s'",
 			invokeMethod.Name,
-			typeDef.TypeNamespace+"."+typeDef.TypeName,
+			typeDef.TypeNamespace()+"."+typeDef.TypeName,
 			invokeMethodName,
 		)
 	}
@@ -561,7 +562,7 @@ func (g *generator) createGenDelegate(typeDef *winmd.TypeDef) (*genDelegate, err
 	}, nil
 }
 
-func (g *generator) interfaceIsExclusiveTo(typeDef *winmd.TypeDef) (string, bool) {
+func (g *generator) interfaceIsExclusiveTo(typeDef *winmdpkg.TypeDef) (string, bool) {
 	exclusiveToBlob, err := typeDef.GetAttributeWithType(winmd.AttributeTypeExclusiveTo)
 	// an error here is fine, we just won't have the ExclusiveTo attribute
 	if err != nil {
@@ -594,7 +595,7 @@ func extractClassFromBlob(blob []byte) string {
 	return string(class)
 }
 
-func (g *generator) getGenFuncs(typeDef *winmd.TypeDef, requiresActivation bool) ([]*genFunc, error) {
+func (g *generator) getGenFuncs(typeDef *winmdpkg.TypeDef, requiresActivation bool) ([]*genFunc, error) {
 	var genFuncs []*genFunc
 
 	methods, err := typeDef.ResolveMethodList(typeDef.Ctx())
@@ -620,11 +621,11 @@ func (g *generator) getGenFuncs(typeDef *winmd.TypeDef, requiresActivation bool)
 	return genFuncs, nil
 }
 
-func (g *generator) genFuncFromMethod(typeDef *winmd.TypeDef, methodDef *types.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
+func (g *generator) genFuncFromMethod(typeDef *winmdpkg.TypeDef, methodDef *types.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
 	// add the type imports to the top of the file
 	// only if the method is going to be implemented
 
-	overloadName := winmd.GetMethodOverloadName(typeDef.Ctx(), methodDef)
+	overloadName := winmdpkg.GetMethodOverloadName(typeDef.Ctx(), methodDef)
 	implement := g.shouldImplementMethod(overloadName)
 	if !implement {
 		// if we don't implement the method, we don't need to gather
@@ -641,7 +642,7 @@ func (g *generator) genFuncFromMethod(typeDef *winmd.TypeDef, methodDef *types.M
 		}, nil
 	}
 
-	curPackage := typePackage(typeDef.TypeNamespace, typeDef.TypeName)
+	curPackage := typePackage(typeDef.TypeNamespace(), typeDef.TypeName)
 
 	params, err := g.getInParameters(curPackage, typeDef, methodDef)
 	if err != nil {
@@ -684,7 +685,7 @@ func (g *generator) shouldImplementMethod(methodName string) bool {
 	return g.methodFilter.Filter(methodName)
 }
 
-func (g *generator) getInParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
+func (g *generator) getInParameters(curPackage string, typeDef *winmdpkg.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
 
 	params, err := methodDef.ResolveParamList(typeDef.Ctx())
 	if err != nil {
@@ -753,7 +754,7 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmd.TypeDef, m
 	return genParams, nil
 }
 
-func (g *generator) getReturnParameters(curPackage string, typeDef *winmd.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
+func (g *generator) getReturnParameters(curPackage string, typeDef *winmdpkg.TypeDef, methodDef *types.MethodDef) ([]*genParam, error) {
 	// the signature contains the parameter
 	// types and return type of the method
 	r := methodDef.Signature.Reader()
@@ -1094,7 +1095,7 @@ func (g *generator) elementDefaultValue(ctx *types.Context, e types.Element) gen
 	}
 }
 
-func (g *generator) Signature(typeDef *winmd.TypeDef) (string, error) {
+func (g *generator) Signature(typeDef *winmdpkg.TypeDef) (string, error) {
 	// Signature generation defined in
 	// https://docs.microsoft.com/en-us/uwp/winrt-cref/winrt-type-system#guid-generation-for-parameterized-types
 
@@ -1139,7 +1140,7 @@ func (g *generator) Signature(typeDef *winmd.TypeDef) (string, error) {
 		}
 
 		enumType := primitiveTypeSignature(fieldSig.Field.Type.Kind)
-		return fmt.Sprintf(`enum(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, enumType), nil
+		return fmt.Sprintf(`enum(%s;%s)`, typeDef.TypeNamespace()+"."+typeDef.TypeName, enumType), nil
 	case typeDef.IsStruct():
 		// struct_signature => "struct(" struct_name ";" args ")"
 		fields, err := typeDef.ResolveFieldList(typeDef.Ctx())
@@ -1176,7 +1177,7 @@ func (g *generator) Signature(typeDef *winmd.TypeDef) (string, error) {
 				structArgs = append(structArgs, primitiveTypeSignature(fSig.Field.Type.Kind))
 			}
 		}
-		return fmt.Sprintf(`struct(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, strings.Join(structArgs, ";")), nil
+		return fmt.Sprintf(`struct(%s;%s)`, typeDef.TypeNamespace()+"."+typeDef.TypeName, strings.Join(structArgs, ";")), nil
 	case typeDef.IsDelegate():
 		//delegate_signature => "delegate(" guid ")"
 		guid, err := typeDef.GUID()
@@ -1220,7 +1221,7 @@ func (g *generator) Signature(typeDef *winmd.TypeDef) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		return fmt.Sprintf(`rc(%s;%s)`, typeDef.TypeNamespace+"."+typeDef.TypeName, defaultInterfaceSignature), nil
+		return fmt.Sprintf(`rc(%s;%s)`, typeDef.TypeNamespace()+"."+typeDef.TypeName, defaultInterfaceSignature), nil
 	default:
 		return "", fmt.Errorf("unsupported type: %v", typeDef.TypeName)
 	}

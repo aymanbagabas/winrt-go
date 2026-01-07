@@ -4,8 +4,7 @@ import (
 	"fmt"
 
 	"github.com/go-kit/log"
-	"github.com/tdakkota/win32metadata/md"
-	"github.com/tdakkota/win32metadata/types"
+	"github.com/microsoft/go-winmd"
 )
 
 // ClassNotFoundError is returned when a class is not found.
@@ -17,15 +16,15 @@ func (e *ClassNotFoundError) Error() string {
 	return fmt.Sprintf("class %s was not found", e.Class)
 }
 
-// Store holds the windows metadata contexts. It can be used to get the metadata across multiple files.
+// Store holds the windows metadata. It can be used to get the metadata across multiple files.
 type Store struct {
-	contexts map[string]*types.Context
-	logger   log.Logger
+	metadatas map[string]*winmd.Metadata
+	logger    log.Logger
 }
 
 // NewStore loads all windows metadata files and returns a new Store.
 func NewStore(logger log.Logger) (*Store, error) {
-	contexts := make(map[string]*types.Context)
+	metadatas := make(map[string]*winmd.Metadata)
 
 	winmdFiles, err := allFiles()
 	if err != nil {
@@ -34,53 +33,62 @@ func NewStore(logger log.Logger) (*Store, error) {
 
 	// parse and store all files in memory
 	for _, f := range winmdFiles {
-		winmdCtx, err := parseWinMDFile(f.Name())
+		winmdMetadata, err := parseWinMDFile(f.Name())
 		if err != nil {
 			return nil, err
 		}
-		contexts[f.Name()] = winmdCtx
+		metadatas[f.Name()] = winmdMetadata
 	}
 
 	return &Store{
-		contexts: contexts,
-		logger:   logger,
+		metadatas: metadatas,
+		logger:    logger,
 	}, nil
 }
 
-func parseWinMDFile(path string) (*types.Context, error) {
+func parseWinMDFile(path string) (*winmd.Metadata, error) {
 	f, err := open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
 
-	return types.FromPE(f)
+	return winmd.New(f)
 }
 
 // TypeDefByName returns a type definition that matches the given name.
 func (mds *Store) TypeDefByName(class string) (*TypeDef, error) {
-	// the type can belong to any of the contexts
-	for _, ctx := range mds.contexts {
-		if td := mds.typeDefByNameAndCtx(class, ctx); td != nil {
+	// the type can belong to any of the metadatas
+	for _, metadata := range mds.metadatas {
+		if td := mds.typeDefByNameAndMetadata(class, metadata); td != nil {
 			return td, nil // return the first match
 		}
 	}
 	return nil, &ClassNotFoundError{Class: class}
 }
 
-func (mds *Store) typeDefByNameAndCtx(class string, ctx *types.Context) *TypeDef {
-	typeDefTable := ctx.Table(md.TypeDef)
-	for i := uint32(0); i < typeDefTable.RowCount(); i++ {
-		var typeDef types.TypeDef
-		if err := typeDef.FromRow(typeDefTable.Row(i)); err != nil {
+func (mds *Store) typeDefByNameAndMetadata(class string, metadata *winmd.Metadata) *TypeDef {
+	// Iterate through TypeDef table
+	for i := winmd.Index(1); i <= winmd.Index(metadata.Tables.TypeDef.Len); i++ {
+		typeDef, err := metadata.Tables.TypeDef.Record(i)
+		if err != nil {
 			continue // keep searching instead of failing
 		}
 
-		if typeDef.TypeNamespace+"."+typeDef.TypeName == class {
+		typeNamespace, err := metadata.Strings.String(typeDef.Namespace.Start)
+		if err != nil {
+			continue
+		}
+		typeName, err := metadata.Strings.String(typeDef.Name.Start)
+		if err != nil {
+			continue
+		}
+
+		if typeNamespace.String()+"."+typeName.String() == class {
 			return &TypeDef{
-				TypeDef:    typeDef,
-				HasContext: HasContext{ctx},
-				logger:     mds.logger,
+				TypeDef:     typeDef,
+				HasMetadata: HasMetadata{metadata},
+				logger:      mds.logger,
 			}
 		}
 	}
