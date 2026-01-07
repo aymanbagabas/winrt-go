@@ -322,16 +322,32 @@ func (g *generator) sigTypeToGenParamType(ctx *winmd.Metadata, sigType winmd.Sig
 			namespace:    "",
 			name:         "interface{}",
 			IsPointer:    false,
-			IsPrimitive:  false,
+			IsPrimitive:  true, // Treat interface{} as primitive to avoid package prefix
 			IsArray:      false,
 			defaultValue: genDefaultValue{"nil", true},
 		}, nil
-	case flags.ElementType_VALUETYPE, flags.ElementType_CLASS:
-		// These require looking up the type by CodedIndex in Value
+	case flags.ElementType_CLASS:
+		// CLASS types are reference types (pointers)
 		if codedIdx, ok := sigType.Value.(winmd.CodedIndex); ok {
-			return g.resolveCodedIndexType(ctx, codedIdx, curPackage)
+			paramType, err := g.resolveCodedIndexType(ctx, codedIdx, curPackage)
+			if err != nil {
+				return nil, err
+			}
+			paramType.IsPointer = true
+			return paramType, nil
 		}
-		return nil, fmt.Errorf("VALUETYPE/CLASS without CodedIndex")
+		return nil, fmt.Errorf("CLASS without CodedIndex")
+	case flags.ElementType_VALUETYPE:
+		// VALUETYPE types are value types (not pointers)
+		if codedIdx, ok := sigType.Value.(winmd.CodedIndex); ok {
+			paramType, err := g.resolveCodedIndexType(ctx, codedIdx, curPackage)
+			if err != nil {
+				return nil, err
+			}
+			paramType.IsPointer = false
+			return paramType, nil
+		}
+		return nil, fmt.Errorf("VALUETYPE without CodedIndex")
 	case flags.ElementType_SZARRAY:
 		// Single-dimension array with zero lower bound
 		if arrayType, ok := sigType.Value.(winmd.SigType); ok {
@@ -356,7 +372,7 @@ func (g *generator) sigTypeToGenParamType(ctx *winmd.Metadata, sigType winmd.Sig
 			namespace:    "",
 			name:         "interface{}",
 			IsPointer:    false,
-			IsPrimitive:  false,
+			IsPrimitive:  true, // Treat interface{} as primitive to avoid package prefix
 			IsArray:      false,
 			defaultValue: genDefaultValue{"nil", true},
 		}, nil
@@ -375,11 +391,12 @@ func (g *generator) resolveCodedIndexType(ctx *winmd.Metadata, codedIdx winmd.Co
 			return nil, err
 		}
 		return &genParamType{
-			namespace:   typeDef.Namespace.String(),
-			name:        typeDef.Name.String(),
-			IsPointer:   false,
-			IsPrimitive: false,
-			IsArray:     false,
+			namespace:    typeDef.Namespace.String(),
+			name:         typeDef.Name.String(),
+			IsPointer:    false,
+			IsPrimitive:  false,
+			IsArray:      false,
+			defaultValue: genDefaultValue{"nil", true},
 		}, nil
 	case 1: // TypeRef
 		typeRef, err := ctx.Tables.TypeRef.Record(codedIdx.Index)
@@ -387,11 +404,12 @@ func (g *generator) resolveCodedIndexType(ctx *winmd.Metadata, codedIdx winmd.Co
 			return nil, err
 		}
 		return &genParamType{
-			namespace:   typeRef.Namespace.String(),
-			name:        typeRef.Name.String(),
-			IsPointer:   false,
-			IsPrimitive: false,
-			IsArray:     false,
+			namespace:    typeRef.Namespace.String(),
+			name:         typeRef.Name.String(),
+			IsPointer:    false,
+			IsPrimitive:  false,
+			IsArray:      false,
+			defaultValue: genDefaultValue{"nil", true},
 		}, nil
 	case 2: // TypeSpec
 		// TypeSpec is more complex, skip for now
@@ -408,6 +426,10 @@ func (g *generator) resolveGenericInst(ctx *winmd.Metadata, genInst winmd.SigGen
 	if err != nil {
 		return nil, err
 	}
+	
+	// Set IsPointer based on whether it's a CLASS or VALUETYPE
+	// CLASS types are reference types (pointers), VALUETYPE are value types
+	baseType.IsPointer = genInst.Class
 	
 	// For now, just return the base type without generic parameters
 	// Full generic support would require tracking the type parameters
