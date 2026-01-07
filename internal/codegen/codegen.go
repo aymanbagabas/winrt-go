@@ -420,7 +420,7 @@ func (g *generator) createGenEnum(typeDef *winmdLocal.TypeDef) (*genEnum, error)
 	}
 
 	// Parse the first field's signature to get the underlying enum type
-	fieldSig, err := typeDef.Ctx().FieldSignature(fields[0].Signature)
+	fieldSig, err := safeFieldSignature(typeDef.Ctx(), fields[0].Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -481,7 +481,7 @@ func (g *generator) createGenStruct(typeDef *winmdLocal.TypeDef) (*genStruct, er
 	var genFields []*genParam
 	for _, f := range fields {
 		// Parse field signature using new API
-		fieldSig, err := typeDef.Ctx().FieldSignature(f.Signature)
+		fieldSig, err := safeFieldSignature(typeDef.Ctx(), f.Signature)
 		if err != nil {
 			return nil, err
 		}
@@ -696,7 +696,7 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeD
 	}
 
 	// Parse method signature using new API
-	methodSig, err := typeDef.Ctx().MethodDefSignature(methodDef.Signature)
+	methodSig, err := safeMethodDefSignature(typeDef.Ctx(), methodDef.Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -757,7 +757,7 @@ func (g *generator) getInParameters(curPackage string, typeDef *winmdLocal.TypeD
 
 func (g *generator) getReturnParameters(curPackage string, typeDef *winmdLocal.TypeDef, methodDef *winmd.MethodDef) ([]*genParam, error) {
 	// Parse method signature using new API
-	methodSig, err := typeDef.Ctx().MethodDefSignature(methodDef.Signature)
+	methodSig, err := safeMethodDefSignature(typeDef.Ctx(), methodDef.Signature)
 	if err != nil {
 		return nil, err
 	}
@@ -842,7 +842,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		fieldSig, err := typeDef.Ctx().FieldSignature(fields[0].Signature)
+		fieldSig, err := safeFieldSignature(typeDef.Ctx(), fields[0].Signature)
 		if err != nil {
 			return "", err
 		}
@@ -857,7 +857,7 @@ func (g *generator) Signature(typeDef *winmdLocal.TypeDef) (string, error) {
 		}
 		structArgs := []string{}
 		for _, f := range fields {
-			fSig, err := typeDef.Ctx().FieldSignature(f.Signature)
+			fSig, err := safeFieldSignature(typeDef.Ctx(), f.Signature)
 			if err != nil {
 				return "", err
 			}
