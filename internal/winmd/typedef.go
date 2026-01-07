@@ -31,7 +31,9 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 	for i := winmd.Index(0); i < winmd.Index(tableConstants.Len); i++ {
 		constant, err := tableConstants.Record(i)
 		if err != nil {
-			return "", err
+			// Skip constants that can't be read (microsoft/go-winmd bug with some metadata)
+			_ = level.Debug(typeDef.logger).Log("msg", "skipping constant due to error", "index", i, "err", err)
+			continue
 		}
 
 		// Check if parent is a Field and matches our field index
@@ -41,6 +43,8 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 			continue
 		}
 
+		_ = level.Debug(typeDef.logger).Log("msg", "checking constant", "constantIndex", i, "parentIndex", constant.Parent.Index, "lookingFor", fieldIndex)
+		
 		// does the blob belong to the field we're looking for?
 		if uint32(constant.Parent.Index) != fieldIndex {
 			continue
@@ -49,8 +53,16 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) 
 		// The value is already a blob ([]byte), we need to read as little endian
 		valueBlob := constant.Value
 		
+		// Sanity check: if the value looks corrupted (e.g., would give a huge number), return error
+		if len(valueBlob) > 8 {
+			return "", fmt.Errorf("enum value blob too large (%d bytes) for field %d", len(valueBlob), fieldIndex)
+		}
+		
 		var blobIndex uint32
 		for i, b := range valueBlob {
+			if i >= 4 { // Only read up to 4 bytes for uint32
+				break
+			}
 			blobIndex += uint32(b) << (i * 8)
 		}
 		return strconv.Itoa(int(blobIndex)), nil

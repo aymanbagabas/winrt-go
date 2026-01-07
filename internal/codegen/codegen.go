@@ -443,7 +443,11 @@ func (g *generator) createGenEnum(typeDef *winmdLocal.TypeDef) (*genEnum, error)
 				)
 		}
 
+		// The field index is the position in the Field table
+		// FieldList.Start is the index of the first field (the type field at index 0 in our fields array)
+		// So for the enum values (starting at index 1 in fields array), their Field table index is Start + 1 + i
 		var fieldIndex uint32 = uint32(typeDef.FieldList.Start) + 1 + uint32(i)
+		_ = level.Debug(g.logger).Log("msg", "getting enum value", "field", field.Name.String(), "fieldIndex", fieldIndex, "fieldListStart", typeDef.FieldList.Start)
 		enumRawValue, err := typeDef.GetValueForEnumField(fieldIndex)
 		if err != nil {
 			return nil, err

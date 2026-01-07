@@ -29,12 +29,12 @@ func (v *IReference) VTable() *IReferenceVtbl {
 	return (*IReferenceVtbl)(unsafe.Pointer(v.RawVTable))
 }
 
-func (v *IReference) GetValue() (unsafe.Pointer, error) {
-	var out unsafe.Pointer
+func (v *IReference) GetValue() (interface{}, error) {
+	var out interface{}
 	hr, _, _ := syscall.SyscallN(
 		v.VTable().GetValue,
 		uintptr(unsafe.Pointer(v)),    // this
-		uintptr(unsafe.Pointer(&out)), // out unsafe.Pointer
+		uintptr(unsafe.Pointer(&out)), // out interface{}
 	)
 
 	if hr != 0 {

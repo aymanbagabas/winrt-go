@@ -105,11 +105,11 @@ func (r *AsyncOperationCompletedHandler) removeRef() uintptr {
 
 func (instance *AsyncOperationCompletedHandler) Invoke(instancePtr, rawArgs0, rawArgs1, rawArgs2, rawArgs3, rawArgs4, rawArgs5, rawArgs6, rawArgs7, rawArgs8 unsafe.Pointer) uintptr {
 	asyncInfoPtr := rawArgs0
-	asyncStatusRaw := (int32)(uintptr(rawArgs1))
+	asyncStatusPtr := rawArgs1
 
 	// See the quote above.
 	asyncInfo := (*IAsyncOperation)(asyncInfoPtr)
-	asyncStatus := (AsyncStatus)(asyncStatusRaw)
+	asyncStatus := (AsyncStatus)(asyncStatusPtr)
 	if callback, ok := callbacksAsyncOperationCompletedHandler.get(instancePtr); ok {
 		callback(instance, asyncInfo, asyncStatus)
 	}

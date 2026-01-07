@@ -1,0 +1,86 @@
+name: Update Windows Metadata
+
+on:
+  schedule:
+    # Run every Monday at 00:00 UTC
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-metadata:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.18'
+
+      - name: Download latest Windows Metadata
+        shell: pwsh
+        run: |
+          # Create metadata directory if it doesn't exist
+          New-Item -ItemType Directory -Force -Path internal/winmd/metadata
+          
+          # Download the latest metadata files from Microsoft's NuGet package
+          $nugetUrl = "https://www.nuget.org/api/v2/package/Microsoft.Windows.SDK.Win32Metadata"
+          $tempZip = "metadata.zip"
+          $tempDir = "metadata_temp"
+          
+          Write-Host "Downloading Windows metadata..."
+          Invoke-WebRequest -Uri $nugetUrl -OutFile $tempZip
+          
+          Write-Host "Extracting metadata files..."
+          Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+          
+          # Copy winmd files to the target directory
+          Get-ChildItem -Path "$tempDir" -Filter "*.winmd" -Recurse | ForEach-Object {
+            Copy-Item $_.FullName -Destination "internal/winmd/metadata/" -Force
+            Write-Host "Copied: $($_.Name)"
+          }
+          
+          # Cleanup
+          Remove-Item $tempZip -Force
+          Remove-Item $tempDir -Recurse -Force
+          
+          Write-Host "Metadata update complete!"
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          git diff --exit-code internal/winmd/metadata/ || echo "changes=true" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: Create Pull Request
+        if: steps.check_changes.outputs.changes == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: 'chore: update Windows metadata files'
+          title: 'chore: Update Windows metadata files'
+          body: |
+            ## Automated Windows Metadata Update
+            
+            This PR updates the Windows metadata (`.winmd`) files to the latest version from Microsoft's official NuGet package.
+            
+            ### Changes
+            - Updated metadata files in `internal/winmd/metadata/`
+            
+            ### Testing
+            Please verify that:
+            - [ ] The build passes successfully
+            - [ ] All existing tests pass
+            - [ ] Generated code is still valid
+            
+            This PR was automatically created by the weekly metadata update workflow.
+          branch: automated-metadata-update
+          delete-branch: true
+          labels: |
+            dependencies
+            automated
