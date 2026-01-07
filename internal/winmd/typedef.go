@@ -316,6 +316,32 @@ func (typeDef *TypeDef) GUID() (string, error) {
 	return guidBlobToString(blob)
 }
 
+// ResolveMethodList returns the methods defined in this type.
+func (typeDef *TypeDef) ResolveMethodList() ([]*winmd.MethodDef, error) {
+	methods := make([]*winmd.MethodDef, 0)
+	for i := typeDef.MethodList.Start; i < typeDef.MethodList.End; i++ {
+		method, err := typeDef.Metadata().Tables.MethodDef.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		methods = append(methods, method)
+	}
+	return methods, nil
+}
+
+// ResolveFieldList returns the fields defined in this type.
+func (typeDef *TypeDef) ResolveFieldList() ([]*winmd.Field, error) {
+	fields := make([]*winmd.Field, 0)
+	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
+		field, err := typeDef.Metadata().Tables.Field.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	return fields, nil
+}
+
 func guidBlobToString(b []byte) (string, error) {
 	// Custom attribute blob format: prolog (2 bytes) + guid (16 bytes)
 	if len(b) < 18 {

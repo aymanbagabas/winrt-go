@@ -598,7 +598,7 @@ func extractClassFromBlob(blob []byte) string {
 func (g *generator) getGenFuncs(typeDef *winmdpkg.TypeDef, requiresActivation bool) ([]*genFunc, error) {
 	var genFuncs []*genFunc
 
-	methods, err := typeDef.ResolveMethodList(typeDef.Ctx())
+	methods, err := typeDef.ResolveMethodList()
 	if err != nil {
 		return nil, err
 	}
@@ -610,7 +610,7 @@ func (g *generator) getGenFuncs(typeDef *winmdpkg.TypeDef, requiresActivation bo
 
 	for _, m := range methods {
 		methodDef := m
-		generatedFunc, err := g.genFuncFromMethod(typeDef, &methodDef, exclusiveToType, requiresActivation)
+		generatedFunc, err := g.genFuncFromMethod(typeDef, methodDef, exclusiveToType, requiresActivation)
 		if err != nil {
 			return nil, err
 		}
@@ -621,11 +621,11 @@ func (g *generator) getGenFuncs(typeDef *winmdpkg.TypeDef, requiresActivation bo
 	return genFuncs, nil
 }
 
-func (g *generator) genFuncFromMethod(typeDef *winmdpkg.TypeDef, methodDef *types.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
+func (g *generator) genFuncFromMethod(typeDef *winmdpkg.TypeDef, methodDef *winmd.MethodDef, exclusiveTo string, requiresActivation bool) (*genFunc, error) {
 	// add the type imports to the top of the file
 	// only if the method is going to be implemented
 
-	overloadName := winmdpkg.GetMethodOverloadName(typeDef.Ctx(), methodDef)
+	overloadName := winmdpkg.GetMethodOverloadName(typeDef.Metadata(), methodDef)
 	implement := g.shouldImplementMethod(overloadName)
 	if !implement {
 		// if we don't implement the method, we don't need to gather
@@ -636,13 +636,13 @@ func (g *generator) genFuncFromMethod(typeDef *winmdpkg.TypeDef, methodDef *type
 			Implement:          implement,
 			InParams:           nil,
 			ReturnParams:       nil,
-			FuncOwner:          typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+			FuncOwner:          typeDefGoName(typeDef.TypeName(), typeDef.Flags&flags.TypeAttributes_Public != 0),
 			ExclusiveTo:        exclusiveTo,
 			RequiresActivation: requiresActivation,
 		}, nil
 	}
 
-	curPackage := typePackage(typeDef.TypeNamespace(), typeDef.TypeName)
+	curPackage := typePackage(typeDef.TypeNamespace(), typeDef.TypeName())
 
 	params, err := g.getInParameters(curPackage, typeDef, methodDef)
 	if err != nil {
@@ -675,7 +675,7 @@ func (g *generator) genFuncFromMethod(typeDef *winmdpkg.TypeDef, methodDef *type
 		Implement:          implement,
 		InParams:           params,
 		ReturnParams:       retParams,
-		FuncOwner:          typeDefGoName(typeDef.TypeName, typeDef.Flags.Public()),
+		FuncOwner:          typeDefGoName(typeDef.TypeName(), typeDef.Flags&flags.TypeAttributes_Public != 0),
 		ExclusiveTo:        exclusiveTo,
 		RequiresActivation: requiresActivation,
 	}, nil
