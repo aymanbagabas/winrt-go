@@ -1,76 +1,71 @@
 package winmd
 
 import (
-	"github.com/tdakkota/win32metadata/md"
-	"github.com/tdakkota/win32metadata/types"
+	"github.com/microsoft/go-winmd"
 )
 
 // GetMethodOverloadName finds and returns the overload attribute for the given method
-func GetMethodOverloadName(ctx *types.Context, methodDef *types.MethodDef) string {
-	cAttrTable := ctx.Table(md.CustomAttribute)
-	for i := uint32(0); i < cAttrTable.RowCount(); i++ {
-		var cAttr types.CustomAttribute
-		if err := cAttr.FromRow(cAttrTable.Row(i)); err != nil {
+func GetMethodOverloadName(metadata *winmd.Metadata, methodDef *winmd.MethodDef) string {
+	methodName, _ := metadata.Strings.String(methodDef.Name.Start)
+	
+	// Iterate through CustomAttribute table
+	for i := winmd.Index(1); i <= winmd.Index(metadata.Tables.CustomAttribute.Len); i++ {
+		cAttr, err := metadata.Tables.CustomAttribute.Record(i)
+		if err != nil {
 			continue
 		}
 
-		// - Parent: The owner of the Attribute must be the given func
-		if cAttrParentTable, _ := cAttr.Parent.Table(); cAttrParentTable != md.MethodDef {
+		// Check if the parent is a MethodDef (tag 0 in HasCustomAttribute)
+		if cAttr.Parent.Tag != 0 {
 			continue
 		}
 
-		var parentMethodDef types.MethodDef
-		row, ok := cAttr.Parent.Row(ctx)
-		if !ok {
-			continue
-		}
-		if err := parentMethodDef.FromRow(row); err != nil {
+		// Get the parent MethodDef
+		parentMethodDef, err := metadata.Tables.MethodDef.Record(cAttr.Parent.Index)
+		if err != nil {
 			continue
 		}
 
-		// does the blob belong to the method we're looking for?
-		if parentMethodDef.Name != methodDef.Name || string(parentMethodDef.Signature) != string(methodDef.Signature) {
+		// Check if it's the method we're looking for
+		parentMethodName, _ := metadata.Strings.String(parentMethodDef.Name.Start)
+		if parentMethodName.String() != methodName.String() {
 			continue
 		}
 
-		// - Type: the attribute type must be the given type
-		// the cAttr.Type table can be either a MemberRef or a MethodRef.
-		// Since we are looking for a type, we will only consider the MemberRef.
-		if cAttrTypeTable, _ := cAttr.Type.Table(); cAttrTypeTable != md.MemberRef {
+		// Check if the Type is OverloadAttribute (should be a MemberRef)
+		if cAttr.Type.Tag != 2 { // 2 is MemberRef in CustomAttributeType
 			continue
 		}
 
-		var attrTypeMemberRef types.MemberRef
-		row, ok = cAttr.Type.Row(ctx)
-		if !ok {
-			continue
-		}
-		if err := attrTypeMemberRef.FromRow(row); err != nil {
+		memberRef, err := metadata.Tables.MemberRef.Record(cAttr.Type.Index)
+		if err != nil {
 			continue
 		}
 
-		// we need to check the MemberRef Class
-		// the value can belong to several tables, but we are only going to check for TypeRef
-		if classTable, _ := attrTypeMemberRef.Class.Table(); classTable != md.TypeRef {
+		// Get the class of the MemberRef (should be a TypeRef)
+		if memberRef.Class.Tag != 1 { // 1 is TypeRef in MemberRefParent
 			continue
 		}
 
-		var attrTypeRef types.TypeRef
-		row, ok = attrTypeMemberRef.Class.Row(ctx)
-		if !ok {
-			continue
-		}
-		if err := attrTypeRef.FromRow(row); err != nil {
+		typeRef, err := metadata.Tables.TypeRef.Record(memberRef.Class.Index)
+		if err != nil {
 			continue
 		}
 
-		if attrTypeRef.TypeNamespace+"."+attrTypeRef.TypeName == AttributeTypeOverloadAttribute {
+		typeRefNs, _ := metadata.Strings.String(typeRef.Namespace.Start)
+		typeRefName, _ := metadata.Strings.String(typeRef.Name.Start)
+		if typeRefNs.String()+"."+typeRefName.String() == AttributeTypeOverloadAttribute {
 			// Metadata values start with 0x01 0x00 and ends with 0x00 0x00
-			mdVal := cAttr.Value[2 : len(cAttr.Value)-2]
-			// the next value is the length of the string
-			mdVal = mdVal[1:]
-			return string(mdVal)
+			if len(cAttr.Value) > 3 {
+				mdVal := cAttr.Value[2 : len(cAttr.Value)-2]
+				// the next value is the length of the string
+				if len(mdVal) > 1 {
+					mdVal = mdVal[1:]
+					return string(mdVal)
+				}
+			}
 		}
 	}
-	return methodDef.Name
+	return methodName.String()
 }
+

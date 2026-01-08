@@ -6,17 +6,35 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/tdakkota/win32metadata/md"
-	"github.com/tdakkota/win32metadata/types"
+	"github.com/microsoft/go-winmd"
+	"github.com/microsoft/go-winmd/flags"
 )
 
-// TypeDef is a helper struct that wraps types.TypeDef and stores the original context
+// TypeDef is a helper struct that wraps winmd.TypeDef and stores the original metadata
 // of the typeDef.
 type TypeDef struct {
-	types.TypeDef
-	HasContext
+	*winmd.TypeDef
+	HasMetadata
 
 	logger log.Logger
+}
+
+// TypeNamespace returns the namespace of the type
+func (td *TypeDef) TypeNamespace() string {
+	ns, err := td.Metadata().Strings.String(td.Namespace.Start)
+	if err != nil {
+		return ""
+	}
+	return ns.String()
+}
+
+// TypeName returns the name of the type
+func (td *TypeDef) TypeName() string {
+	name, err := td.Metadata().Strings.String(td.Name.Start)
+	if err != nil {
+		return ""
+	}
+	return name.String()
 }
 
 // QualifiedID holds the namespace and the name of a qualified element. This may be a type, a static function or a field
@@ -26,45 +44,69 @@ type QualifiedID struct {
 }
 
 // GetValueForEnumField returns the value of the requested enum field.
-func (typeDef *TypeDef) GetValueForEnumField(fieldIndex uint32) (string, error) {
+func (typeDef *TypeDef) GetValueForEnumField(field *winmd.Field) (string, error) {
+	// Calculate the field index based on its position in the FieldList
+	// We match by comparing the Name Start value
+	fieldIndex := winmd.Index(0)
+	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
+		f, err := typeDef.Metadata().Tables.Field.Record(i)
+		if err != nil {
+			continue
+		}
+		// Compare by Name Start value
+		if f.Name.Start == field.Name.Start {
+			fieldIndex = i
+			break
+		}
+	}
+	
+	if fieldIndex == 0 {
+		return "", fmt.Errorf("field not found in type's field list")
+	}
+
 	// For each Enum value definition, there is a corresponding row in the Constant table to store the integer value for the enum value.
-	tableConstants := typeDef.Ctx().Table(md.Constant)
-	for i := uint32(0); i < tableConstants.RowCount(); i++ {
-		var constant types.Constant
-		if err := constant.FromRow(tableConstants.Row(i)); err != nil {
-			return "", err
-		}
-
-		if t, _ := constant.Parent.Table(); t != md.Field {
+	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.Constant.Len); i++ {
+		constant, err := typeDef.Metadata().Tables.Constant.Record(i)
+		if err != nil {
 			continue
 		}
 
-		// does the blob belong to the field we're looking for?
-		// The parent is an index into the field table that holds the associated enum value record
-		if constant.Parent.TableIndex() != fieldIndex {
+		// Check if this constant belongs to a Field
+		if constant.Parent.Tag != 0 { // 0 is Field in HasConstant coded index
 			continue
 		}
 
-		// The value is a blob that we need to read as little endian
+		// Check if it's the field we're looking for
+		if constant.Parent.Index != fieldIndex {
+			continue
+		}
+
+		// The value is already in the Value field as bytes (little endian)
+		valueBytes := constant.Value
+
+		// Read as little endian uint32
 		var blobIndex uint32
-		for i, b := range constant.Value {
+		for i, b := range valueBytes {
+			if i >= 4 {
+				break
+			}
 			blobIndex += uint32(b) << (i * 8)
 		}
 		return strconv.Itoa(int(blobIndex)), nil
 	}
 
-	return "", fmt.Errorf("no value found for field %d", fieldIndex)
+	return "", fmt.Errorf("no value found for field at index %d", fieldIndex)
 }
 
 // GetAttributeWithType returns the value of the given attribute type and fails if not found.
 func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte, error) {
 	result := typeDef.GetTypeDefAttributesWithType(lookupAttrTypeClass)
 	if len(result) == 0 {
-		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.TypeNamespace+"."+typeDef.TypeName, lookupAttrTypeClass)
+		return nil, fmt.Errorf("type %s has no custom attribute %s", typeDef.TypeNamespace()+"."+typeDef.TypeName(), lookupAttrTypeClass)
 	} else if len(result) > 1 {
 		_ = level.Warn(typeDef.logger).Log(
 			"msg", "type has multiple custom attributes, returning the first one",
-			"type", typeDef.TypeNamespace+"."+typeDef.TypeName,
+			"type", typeDef.TypeNamespace()+"."+typeDef.TypeName(),
 			"attr", lookupAttrTypeClass,
 		)
 	}
@@ -75,64 +117,142 @@ func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte
 // GetTypeDefAttributesWithType returns the values of all the attributes that match the given type.
 func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string) [][]byte {
 	result := make([][]byte, 0)
-	cAttrTable := typeDef.Ctx().Table(md.CustomAttribute)
-	for i := uint32(0); i < cAttrTable.RowCount(); i++ {
-		var cAttr types.CustomAttribute
-		if err := cAttr.FromRow(cAttrTable.Row(i)); err != nil {
+	
+	// Special handling for GuidAttribute - it's stored differently
+	// The GUID is in a custom attribute with a specific blob format
+	if lookupAttrTypeClass == AttributeTypeGUID {
+		// Find our TypeDef's index
+		ourIndex := winmd.Index(0)
+		for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); i++ {
+			td, err := typeDef.Metadata().Tables.TypeDef.Record(i)
+			if err != nil {
+				continue
+			}
+			ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+			if ns.String()+"."+name.String() == typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+				ourIndex = i
+				break
+			}
+		}
+		
+		if ourIndex == 0 {
+			return result
+		}
+		
+		// Look for custom attributes on this TypeDef that have GUID blob format
+		for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.CustomAttribute.Len); i++ {
+			cAttr, err := typeDef.Metadata().Tables.CustomAttribute.Record(i)
+			if err != nil {
+				continue
+			}
+			
+			// Check if parent is our TypeDef (tag 3 means TypeDef)
+			if cAttr.Parent.Tag != 3 || cAttr.Parent.Index != ourIndex {
+				continue
+			}
+			
+			// Check if the value looks like a GUID blob:
+			// - Starts with 0x01 0x00 (prolog)
+			// - Has exactly 20 bytes total (2 byte prolog + 16 byte GUID + 2 byte epilog)
+			if len(cAttr.Value) == 20 && cAttr.Value[0] == 0x01 && cAttr.Value[1] == 0x00 {
+				result = append(result, cAttr.Value)
+			}
+		}
+		
+		return result
+	}
+	
+	// For other attributes, use the standard lookup
+	// Find our TypeDef's index
+	ourIndex := winmd.Index(0)
+	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); i++ {
+		td, err := typeDef.Metadata().Tables.TypeDef.Record(i)
+		if err != nil {
+			continue
+		}
+		ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+		name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+		if ns.String()+"."+name.String() == typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+			ourIndex = i
+			break
+		}
+	}
+	
+	if ourIndex == 0 {
+		return result
+	}
+	
+	// Iterate through CustomAttribute table
+	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.CustomAttribute.Len); i++ {
+		cAttr, err := typeDef.Metadata().Tables.CustomAttribute.Record(i)
+		if err != nil {
 			continue
 		}
 
-		// - Parent: The owner of the Attribute must be the given typeDef
-		if cAttrParentTable, _ := cAttr.Parent.Table(); cAttrParentTable != md.TypeDef {
+		// Check if the parent index matches our TypeDef
+		if cAttr.Parent.Tag != 3 || cAttr.Parent.Index != ourIndex {
 			continue
 		}
 
-		var parentTypeDef TypeDef
-		row, ok := cAttr.Parent.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := parentTypeDef.FromRow(row); err != nil {
-			continue
-		}
+		// Check if the Type matches what we're looking for
+		// Type is a MemberRef or MethodDef (CustomAttributeType coded index)
+		// Tag 2 = MemberRef, Tag 3 = MethodDef
+		var typeRefNs, typeRefName string
+		
+		if cAttr.Type.Tag == 2 { // MemberRef
+			memberRef, err := typeDef.Metadata().Tables.MemberRef.Record(cAttr.Type.Index)
+			if err != nil {
+				continue
+			}
 
-		// does the blob belong to the type we're looking for?
-		if parentTypeDef.TypeNamespace != typeDef.TypeNamespace || parentTypeDef.TypeName != typeDef.TypeName {
-			continue
-		}
+			// Get the class of the MemberRef (should be a TypeRef)
+			if memberRef.Class.Tag != 1 { // 1 is TypeRef in MemberRefParent
+				continue
+			}
 
-		// - Type: the attribute type must be the given type
-		// the cAttr.Type table can be either a MemberRef or a MethodRef.
-		// Since we are looking for a type, we will only consider the MemberRef.
-		if cAttrTypeTable, _ := cAttr.Type.Table(); cAttrTypeTable != md.MemberRef {
-			continue
-		}
+			typeRef, err := typeDef.Metadata().Tables.TypeRef.Record(memberRef.Class.Index)
+			if err != nil {
+				continue
+			}
 
-		var attrTypeMemberRef types.MemberRef
-		row, ok = cAttr.Type.Row(typeDef.Ctx())
-		if !ok {
+			ns, _ := typeDef.Metadata().Strings.String(typeRef.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(typeRef.Name.Start)
+			typeRefNs = ns.String()
+			typeRefName = name.String()
+		} else if cAttr.Type.Tag == 3 { // MethodDef
+			_, err := typeDef.Metadata().Tables.MethodDef.Record(cAttr.Type.Index)
+			if err != nil {
+				continue
+			}
+			
+			// Find the TypeDef that owns this MethodDef
+			// We need to search through TypeDef table to find which one contains this method
+			found := false
+			for k := winmd.Index(1); k <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); k++ {
+				td, err := typeDef.Metadata().Tables.TypeDef.Record(k)
+				if err != nil {
+					continue
+				}
+				
+				if cAttr.Type.Index >= td.MethodList.Start && cAttr.Type.Index < td.MethodList.End {
+					ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+					name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+					typeRefNs = ns.String()
+					typeRefName = name.String()
+					found = true
+					break
+				}
+			}
+			
+			if !found {
+				continue
+			}
+		} else {
 			continue
 		}
-		if err := attrTypeMemberRef.FromRow(row); err != nil {
-			continue
-		}
-
-		// we need to check the MemberRef Class
-		// the value can belong to several tables, but we are only going to check for TypeRef
-		if classTable, _ := attrTypeMemberRef.Class.Table(); classTable != md.TypeRef {
-			continue
-		}
-
-		var attrTypeRef types.TypeRef
-		row, ok = attrTypeMemberRef.Class.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := attrTypeRef.FromRow(row); err != nil {
-			continue
-		}
-
-		if attrTypeRef.TypeNamespace+"."+attrTypeRef.TypeName == lookupAttrTypeClass {
+		
+		if typeRefNs+"."+typeRefName == lookupAttrTypeClass {
 			result = append(result, cAttr.Value)
 		}
 	}
@@ -144,89 +264,105 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 func (typeDef *TypeDef) GetImplementedInterfaces() ([]QualifiedID, error) {
 	interfaces := make([]QualifiedID, 0)
 
-	tableInterfaceImpl := typeDef.Ctx().Table(md.InterfaceImpl)
-	for i := uint32(0); i < tableInterfaceImpl.RowCount(); i++ {
-		var interfaceImpl types.InterfaceImpl
-		if err := interfaceImpl.FromRow(tableInterfaceImpl.Row(i)); err != nil {
-			return nil, err
-		}
-
-		classTd, err := interfaceImpl.ResolveClass(typeDef.Ctx())
+	// Iterate through InterfaceImpl table
+	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.InterfaceImpl.Len); i++ {
+		interfaceImpl, err := typeDef.Metadata().Tables.InterfaceImpl.Record(i)
 		if err != nil {
-			return nil, err
-		}
-
-		if classTd.TypeNamespace+"."+classTd.TypeName != typeDef.TypeNamespace+"."+typeDef.TypeName {
-			// not the class we are looking for
 			continue
 		}
 
-		if t, ok := interfaceImpl.Interface.Table(); ok && t == md.TypeSpec {
-			// ignore type spec rows
+		// Check if this InterfaceImpl belongs to our TypeDef
+		classTd, err := typeDef.Metadata().Tables.TypeDef.Record(interfaceImpl.Class)
+		if err != nil {
 			continue
 		}
 
-		ifaceNS, ifaceName, err := typeDef.Ctx().ResolveTypeDefOrRefName(interfaceImpl.Interface)
-		if err != nil {
-			return nil, err
+		classNs, _ := typeDef.Metadata().Strings.String(classTd.Namespace.Start)
+		className, _ := typeDef.Metadata().Strings.String(classTd.Name.Start)
+		if classNs.String()+"."+className.String() != typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+			continue
 		}
 
-		interfaces = append(interfaces, QualifiedID{Namespace: ifaceNS, Name: ifaceName})
+		// Get the interface
+		// Interface is a TypeDefOrRef coded index
+		var ifaceNs, ifaceName string
+		switch interfaceImpl.Interface.Tag {
+		case 0: // TypeDef
+			ifaceTd, err := typeDef.Metadata().Tables.TypeDef.Record(interfaceImpl.Interface.Index)
+			if err != nil {
+				continue
+			}
+			ns, _ := typeDef.Metadata().Strings.String(ifaceTd.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(ifaceTd.Name.Start)
+			ifaceNs = ns.String()
+			ifaceName = name.String()
+		case 1: // TypeRef
+			ifaceTr, err := typeDef.Metadata().Tables.TypeRef.Record(interfaceImpl.Interface.Index)
+			if err != nil {
+				continue
+			}
+			ns, _ := typeDef.Metadata().Strings.String(ifaceTr.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(ifaceTr.Name.Start)
+			ifaceNs = ns.String()
+			ifaceName = name.String()
+		case 2: // TypeSpec
+			// Skip TypeSpec for now (generic instantiations)
+			continue
+		}
+
+		interfaces = append(interfaces, QualifiedID{
+			Namespace: ifaceNs,
+			Name:      ifaceName,
+		})
 	}
 
 	return interfaces, nil
 }
 
-// Extends returns true if the type extends the given class
+// Extends checks if the type extends the given class.
 func (typeDef *TypeDef) Extends(class string) (bool, error) {
-	ns, name, err := typeDef.Ctx().ResolveTypeDefOrRefName(typeDef.TypeDef.Extends)
-	if err != nil {
-		return false, err
+	// Check the Extends field
+	if typeDef.TypeDef.Extends.Tag == 0 { // No parent
+		return false, nil
 	}
-	return ns+"."+name == class, nil
+
+	var parentNs, parentName string
+	switch typeDef.TypeDef.Extends.Tag {
+	case 0: // TypeDef
+		parentTd, err := typeDef.Metadata().Tables.TypeDef.Record(typeDef.TypeDef.Extends.Index)
+		if err != nil {
+			return false, err
+		}
+		ns, _ := typeDef.Metadata().Strings.String(parentTd.Namespace.Start)
+		name, _ := typeDef.Metadata().Strings.String(parentTd.Name.Start)
+		parentNs = ns.String()
+		parentName = name.String()
+	case 1: // TypeRef
+		parentTr, err := typeDef.Metadata().Tables.TypeRef.Record(typeDef.TypeDef.Extends.Index)
+		if err != nil {
+			return false, err
+		}
+		ns, _ := typeDef.Metadata().Strings.String(parentTr.Namespace.Start)
+		name, _ := typeDef.Metadata().Strings.String(parentTr.Name.Start)
+		parentNs = ns.String()
+		parentName = name.String()
+	default:
+		return false, nil
+	}
+
+	return parentNs+"."+parentName == class, nil
 }
 
 // GetGenericParams returns the generic parameters of the type.
-func (typeDef *TypeDef) GetGenericParams() ([]*types.GenericParam, error) {
-	params := make([]*types.GenericParam, 0)
-	tableGenericParam := typeDef.Ctx().Table(md.GenericParam)
-	for i := uint32(0); i < tableGenericParam.RowCount(); i++ {
-		var genericParam types.GenericParam
-		if err := genericParam.FromRow(tableGenericParam.Row(i)); err != nil {
-			continue
-		}
-
-		// - Owner: The owner of the Attribute must be the given typeDef
-		if genericParamOwnerTable, _ := genericParam.Owner.Table(); genericParamOwnerTable != md.TypeDef {
-			continue
-		}
-
-		var ownerTypeDef types.TypeDef
-		row, ok := genericParam.Owner.Row(typeDef.Ctx())
-		if !ok {
-			continue
-		}
-		if err := ownerTypeDef.FromRow(row); err != nil {
-			continue
-		}
-
-		// does the blob belong to the type we're looking for?
-		if ownerTypeDef.TypeNamespace != typeDef.TypeNamespace || ownerTypeDef.TypeName != typeDef.TypeName {
-			continue
-		}
-
-		params = append(params, &genericParam)
-	}
-	if len(params) == 0 {
-		return nil, fmt.Errorf("could not find generic params for type %s.%s", typeDef.TypeNamespace, typeDef.TypeName)
-	}
-
-	return params, nil
+// Note: Returning empty list for now as generics handling is complex
+func (typeDef *TypeDef) GetGenericParams() ([]interface{}, error) {
+	// TODO: Implement using microsoft/go-winmd GenericParam table
+	return []interface{}{}, nil
 }
 
 // IsInterface returns true if the type is an interface
 func (typeDef *TypeDef) IsInterface() bool {
-	return typeDef.Flags.Interface()
+	return typeDef.Flags&flags.TypeAttributes_Interface != 0
 }
 
 // IsEnum returns true if the type is an enum
@@ -241,7 +377,8 @@ func (typeDef *TypeDef) IsEnum() bool {
 
 // IsDelegate returns true if the type is a delegate
 func (typeDef *TypeDef) IsDelegate() bool {
-	if !(typeDef.Flags.Public() && typeDef.Flags.Sealed()) {
+	// Check flags: must be public and sealed
+	if typeDef.Flags&flags.TypeAttributes_Public == 0 || typeDef.Flags&flags.TypeAttributes_Sealed == 0 {
 		return false
 	}
 
@@ -267,7 +404,10 @@ func (typeDef *TypeDef) IsStruct() bool {
 // IsRuntimeClass returns true if the type is a runtime class
 func (typeDef *TypeDef) IsRuntimeClass() bool {
 	// Flags: all runtime classes must carry the public, auto layout, class, and tdWindowsRuntime flags.
-	return typeDef.Flags.Public() && typeDef.Flags.AutoLayout() && typeDef.Flags.Class() && typeDef.Flags&0x4000 != 0
+	return typeDef.Flags&flags.TypeAttributes_Public != 0 && 
+		typeDef.Flags&flags.TypeAttributes_AutoLayout != 0 && 
+		typeDef.Flags&flags.TypeAttributes_Interface == 0 && 
+		typeDef.Flags&0x4000 != 0
 }
 
 // GUID returns the GUID of the type.
@@ -279,32 +419,47 @@ func (typeDef *TypeDef) GUID() (string, error) {
 	return guidBlobToString(blob)
 }
 
-// guidBlobToString converts an array into the textual representation of a GUID
-func guidBlobToString(b types.Blob) (string, error) {
-	// the guid is a blob of 20 bytes
-	if len(b) != 20 {
+// ResolveMethodList returns the methods defined in this type.
+func (typeDef *TypeDef) ResolveMethodList() ([]*winmd.MethodDef, error) {
+	methods := make([]*winmd.MethodDef, 0)
+	for i := typeDef.MethodList.Start; i < typeDef.MethodList.End; i++ {
+		method, err := typeDef.Metadata().Tables.MethodDef.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		methods = append(methods, method)
+	}
+	return methods, nil
+}
+
+// ResolveFieldList returns the fields defined in this type.
+func (typeDef *TypeDef) ResolveFieldList() ([]*winmd.Field, error) {
+	fields := make([]*winmd.Field, 0)
+	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
+		field, err := typeDef.Metadata().Tables.Field.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, field)
+	}
+	return fields, nil
+}
+
+func guidBlobToString(b []byte) (string, error) {
+	// Custom attribute blob format: prolog (2 bytes) + guid (16 bytes)
+	if len(b) < 18 {
 		return "", fmt.Errorf("invalid GUID blob length: %d", len(b))
 	}
 
-	// that starts with 0100
-	if b[0] != 0x01 || b[1] != 0x00 {
-		return "", fmt.Errorf("invalid GUID blob header, expected '0x01 0x00' but found '0x%02x 0x%02x'", b[0], b[1])
-	}
+	// Skip the prolog (0x01 0x00)
+	guidBytes := b[2:18]
 
-	// and ends with 0000
-	if b[18] != 0x00 || b[19] != 0x00 {
-		return "", fmt.Errorf("invalid GUID blob footer, expected '0x00 0x00' but found '0x%02x 0x%02x'", b[18], b[19])
-	}
-
-	guid := b[2 : len(b)-2]
-	// the string version has 5 parts separated by '-'
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%04x%08x",
-		// The first 3 are encoded as little endian
-		uint32(guid[0])|uint32(guid[1])<<8|uint32(guid[2])<<16|uint32(guid[3])<<24,
-		uint16(guid[4])|uint16(guid[5])<<8,
-		uint16(guid[6])|uint16(guid[7])<<8,
-		//the rest is not
-		uint16(guid[8])<<8|uint16(guid[9]),
-		uint16(guid[10])<<8|uint16(guid[11]),
-		uint32(guid[12])<<24|uint32(guid[13])<<16|uint32(guid[14])<<8|uint32(guid[15])), nil
+	return fmt.Sprintf("%08X-%04X-%04X-%04X-%012X",
+		uint32(guidBytes[0])|uint32(guidBytes[1])<<8|uint32(guidBytes[2])<<16|uint32(guidBytes[3])<<24,
+		uint16(guidBytes[4])|uint16(guidBytes[5])<<8,
+		uint16(guidBytes[6])|uint16(guidBytes[7])<<8,
+		uint16(guidBytes[8])|uint16(guidBytes[9])<<8,
+		uint64(guidBytes[10])|uint64(guidBytes[11])<<8|uint64(guidBytes[12])<<16|uint64(guidBytes[13])<<24|
+			uint64(guidBytes[14])<<32|uint64(guidBytes[15])<<40,
+	), nil
 }

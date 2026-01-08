@@ -12,8 +12,8 @@ import (
 	"github.com/go-ole/go-ole"
 )
 
-const GUIDIClosable string = "30d5a829-7fa4-4026-83bb-d75bae4ea99e"
-const SignatureIClosable string = "{30d5a829-7fa4-4026-83bb-d75bae4ea99e}"
+const GUIDIClosable string = "30D5A829-7FA4-4026-BB83-9EA94EAE5BD7"
+const SignatureIClosable string = "{30D5A829-7FA4-4026-BB83-9EA94EAE5BD7}"
 
 type IClosable struct {
 	ole.IInspectable
