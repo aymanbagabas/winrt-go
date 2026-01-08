@@ -44,7 +44,24 @@ type QualifiedID struct {
 }
 
 // GetValueForEnumField returns the value of the requested enum field.
-func (typeDef *TypeDef) GetValueForEnumField(fieldIndex winmd.Index) (string, error) {
+func (typeDef *TypeDef) GetValueForEnumField(field *winmd.Field) (string, error) {
+	// Calculate the field index based on its position in the FieldList
+	fieldIndex := winmd.Index(0)
+	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
+		f, err := typeDef.Metadata().Tables.Field.Record(i)
+		if err != nil {
+			continue
+		}
+		if f == field {
+			fieldIndex = i
+			break
+		}
+	}
+	
+	if fieldIndex == 0 {
+		return "", fmt.Errorf("field not found in type's field list")
+	}
+
 	// For each Enum value definition, there is a corresponding row in the Constant table to store the integer value for the enum value.
 	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.Constant.Len); i++ {
 		constant, err := typeDef.Metadata().Tables.Constant.Record(i)
@@ -79,7 +96,7 @@ func (typeDef *TypeDef) GetValueForEnumField(fieldIndex winmd.Index) (string, er
 		return strconv.Itoa(int(blobIndex)), nil
 	}
 
-	return "", fmt.Errorf("no value found for field %d", fieldIndex)
+	return "", fmt.Errorf("no value found for field at index %d", fieldIndex)
 }
 
 // GetAttributeWithType returns the value of the given attribute type and fails if not found.
