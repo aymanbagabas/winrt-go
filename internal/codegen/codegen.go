@@ -73,6 +73,14 @@ func (g *generator) generate(typeDef *winmdpkg.TypeDef) error {
 	if typeDef.Flags&0x4000 == 0 {
 		return fmt.Errorf("%s.%s is not a WinRT class", typeDef.TypeNamespace(), typeDef.TypeName())
 	}
+	
+	// Check for generic types - microsoft/go-winmd doesn't fully support them
+	// For now, we skip generating code for generic types
+	if strings.Contains(typeDef.TypeName(), "`") {
+		_ = level.Warn(g.logger).Log("msg", "skipping generic type (not yet supported)", "type", typeDef.TypeNamespace()+"."+typeDef.TypeName())
+		// Don't return an error - just skip
+		return nil
+	}
 
 	// get data & execute templates
 	if err := g.loadCodeGenData(typeDef); err != nil {

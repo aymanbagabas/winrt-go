@@ -46,13 +46,15 @@ type QualifiedID struct {
 // GetValueForEnumField returns the value of the requested enum field.
 func (typeDef *TypeDef) GetValueForEnumField(field *winmd.Field) (string, error) {
 	// Calculate the field index based on its position in the FieldList
+	// We match by comparing the Name Start value
 	fieldIndex := winmd.Index(0)
 	for i := typeDef.FieldList.Start; i < typeDef.FieldList.End; i++ {
 		f, err := typeDef.Metadata().Tables.Field.Record(i)
 		if err != nil {
 			continue
 		}
-		if f == field {
+		// Compare by Name Start value
+		if f.Name.Start == field.Name.Start {
 			fieldIndex = i
 			break
 		}
@@ -79,11 +81,8 @@ func (typeDef *TypeDef) GetValueForEnumField(field *winmd.Field) (string, error)
 			continue
 		}
 
-		// The value is a blob that we need to read as little endian
-		valueBytes, err := typeDef.Metadata().Blob.Bytes(uint32(constant.Type))
-		if err != nil {
-			continue
-		}
+		// The value is already in the Value field as bytes (little endian)
+		valueBytes := constant.Value
 
 		// Read as little endian uint32
 		var blobIndex uint32
@@ -119,6 +118,52 @@ func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte
 func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string) [][]byte {
 	result := make([][]byte, 0)
 	
+	// Special handling for GuidAttribute - it's stored differently
+	// The GUID is in a custom attribute with a specific blob format
+	if lookupAttrTypeClass == AttributeTypeGUID {
+		// Find our TypeDef's index
+		ourIndex := winmd.Index(0)
+		for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); i++ {
+			td, err := typeDef.Metadata().Tables.TypeDef.Record(i)
+			if err != nil {
+				continue
+			}
+			ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+			if ns.String()+"."+name.String() == typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+				ourIndex = i
+				break
+			}
+		}
+		
+		if ourIndex == 0 {
+			return result
+		}
+		
+		// Look for custom attributes on this TypeDef that have GUID blob format
+		for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.CustomAttribute.Len); i++ {
+			cAttr, err := typeDef.Metadata().Tables.CustomAttribute.Record(i)
+			if err != nil {
+				continue
+			}
+			
+			// Check if parent is our TypeDef (tag 3 means TypeDef)
+			if cAttr.Parent.Tag != 3 || cAttr.Parent.Index != ourIndex {
+				continue
+			}
+			
+			// Check if the value looks like a GUID blob:
+			// - Starts with 0x01 0x00 (prolog)
+			// - Has exactly 20 bytes total (2 byte prolog + 16 byte GUID + 2 byte epilog)
+			if len(cAttr.Value) == 20 && cAttr.Value[0] == 0x01 && cAttr.Value[1] == 0x00 {
+				result = append(result, cAttr.Value)
+			}
+		}
+		
+		return result
+	}
+	
+	// For other attributes, use the standard lookup
 	// Find our TypeDef's index
 	ourIndex := winmd.Index(0)
 	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); i++ {
@@ -146,9 +191,7 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 		}
 
 		// Check if the parent index matches our TypeDef
-		// The tag tells us what table the index refers to
-		// We need to check if this is a TypeDef parent
-		if cAttr.Parent.Index != ourIndex {
+		if cAttr.Parent.Tag != 3 || cAttr.Parent.Index != ourIndex {
 			continue
 		}
 
