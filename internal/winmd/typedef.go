@@ -119,6 +119,25 @@ func (typeDef *TypeDef) GetAttributeWithType(lookupAttrTypeClass string) ([]byte
 func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string) [][]byte {
 	result := make([][]byte, 0)
 	
+	// Find our TypeDef's index
+	ourIndex := winmd.Index(0)
+	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); i++ {
+		td, err := typeDef.Metadata().Tables.TypeDef.Record(i)
+		if err != nil {
+			continue
+		}
+		ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+		name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+		if ns.String()+"."+name.String() == typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+			ourIndex = i
+			break
+		}
+	}
+	
+	if ourIndex == 0 {
+		return result
+	}
+	
 	// Iterate through CustomAttribute table
 	for i := winmd.Index(1); i <= winmd.Index(typeDef.Metadata().Tables.CustomAttribute.Len); i++ {
 		cAttr, err := typeDef.Metadata().Tables.CustomAttribute.Record(i)
@@ -126,47 +145,71 @@ func (typeDef *TypeDef) GetTypeDefAttributesWithType(lookupAttrTypeClass string)
 			continue
 		}
 
-		// Check if the parent is a TypeDef (tag 3 in HasCustomAttribute)
-		if cAttr.Parent.Tag != 3 {
-			continue
-		}
-
-		// Check if it's the TypeDef we're looking for
-		parentTypeDef, err := typeDef.Metadata().Tables.TypeDef.Record(cAttr.Parent.Index)
-		if err != nil {
-			continue
-		}
-
-		parentNs, _ := typeDef.Metadata().Strings.String(parentTypeDef.Namespace.Start)
-		parentName, _ := typeDef.Metadata().Strings.String(parentTypeDef.Name.Start)
-		if parentNs.String()+"."+parentName.String() != typeDef.TypeNamespace()+"."+typeDef.TypeName() {
+		// Check if the parent index matches our TypeDef
+		// The tag tells us what table the index refers to
+		// We need to check if this is a TypeDef parent
+		if cAttr.Parent.Index != ourIndex {
 			continue
 		}
 
 		// Check if the Type matches what we're looking for
 		// Type is a MemberRef or MethodDef (CustomAttributeType coded index)
-		if cAttr.Type.Tag != 2 { // 2 is MemberRef
+		// Tag 2 = MemberRef, Tag 3 = MethodDef
+		var typeRefNs, typeRefName string
+		
+		if cAttr.Type.Tag == 2 { // MemberRef
+			memberRef, err := typeDef.Metadata().Tables.MemberRef.Record(cAttr.Type.Index)
+			if err != nil {
+				continue
+			}
+
+			// Get the class of the MemberRef (should be a TypeRef)
+			if memberRef.Class.Tag != 1 { // 1 is TypeRef in MemberRefParent
+				continue
+			}
+
+			typeRef, err := typeDef.Metadata().Tables.TypeRef.Record(memberRef.Class.Index)
+			if err != nil {
+				continue
+			}
+
+			ns, _ := typeDef.Metadata().Strings.String(typeRef.Namespace.Start)
+			name, _ := typeDef.Metadata().Strings.String(typeRef.Name.Start)
+			typeRefNs = ns.String()
+			typeRefName = name.String()
+		} else if cAttr.Type.Tag == 3 { // MethodDef
+			_, err := typeDef.Metadata().Tables.MethodDef.Record(cAttr.Type.Index)
+			if err != nil {
+				continue
+			}
+			
+			// Find the TypeDef that owns this MethodDef
+			// We need to search through TypeDef table to find which one contains this method
+			found := false
+			for k := winmd.Index(1); k <= winmd.Index(typeDef.Metadata().Tables.TypeDef.Len); k++ {
+				td, err := typeDef.Metadata().Tables.TypeDef.Record(k)
+				if err != nil {
+					continue
+				}
+				
+				if cAttr.Type.Index >= td.MethodList.Start && cAttr.Type.Index < td.MethodList.End {
+					ns, _ := typeDef.Metadata().Strings.String(td.Namespace.Start)
+					name, _ := typeDef.Metadata().Strings.String(td.Name.Start)
+					typeRefNs = ns.String()
+					typeRefName = name.String()
+					found = true
+					break
+				}
+			}
+			
+			if !found {
+				continue
+			}
+		} else {
 			continue
 		}
-
-		memberRef, err := typeDef.Metadata().Tables.MemberRef.Record(cAttr.Type.Index)
-		if err != nil {
-			continue
-		}
-
-		// Get the class of the MemberRef (should be a TypeRef)
-		if memberRef.Class.Tag != 1 { // 1 is TypeRef in MemberRefParent
-			continue
-		}
-
-		typeRef, err := typeDef.Metadata().Tables.TypeRef.Record(memberRef.Class.Index)
-		if err != nil {
-			continue
-		}
-
-		typeRefNs, _ := typeDef.Metadata().Strings.String(typeRef.Namespace.Start)
-		typeRefName, _ := typeDef.Metadata().Strings.String(typeRef.Name.Start)
-		if typeRefNs.String()+"."+typeRefName.String() == lookupAttrTypeClass {
+		
+		if typeRefNs+"."+typeRefName == lookupAttrTypeClass {
 			result = append(result, cAttr.Value)
 		}
 	}

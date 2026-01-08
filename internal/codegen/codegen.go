@@ -309,7 +309,7 @@ func (g *generator) createGenClass(typeDef *winmdpkg.TypeDef) (*genClass, error)
 		if td, err := g.mdStore.TypeDefByName(iface.Namespace + "." + iface.Name); err == nil {
 			if _, ok := g.interfaceIsExclusiveTo(td); ok {
 				exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, td)
-				activatedInterfaces[td.TypeNamespace+"."+td.TypeName] = false // implemented interfaces do not require activation
+				activatedInterfaces[td.TypeNamespace()+"."+td.TypeName()] = false // implemented interfaces do not require activation
 			}
 		}
 	}
@@ -327,7 +327,7 @@ func (g *generator) createGenClass(typeDef *winmdpkg.TypeDef) (*genClass, error)
 		}
 
 		exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, staticClass)
-		activatedInterfaces[staticClass.TypeNamespace+"."+staticClass.TypeName] = true // static interfaces require activation
+		activatedInterfaces[staticClass.TypeNamespace()+"."+staticClass.TypeName()] = true // static interfaces require activation
 	}
 
 	// Runtime classes have zero or more ActivatableAttribute custom attributes
@@ -355,13 +355,13 @@ func (g *generator) createGenClass(typeDef *winmdpkg.TypeDef) (*genClass, error)
 			continue
 		}
 		exclusiveInterfaceTypes = append(exclusiveInterfaceTypes, activatableClass)
-		activatedInterfaces[activatableClass.TypeNamespace+"."+activatableClass.TypeName] = true // activatable interfaces require activation
+		activatedInterfaces[activatableClass.TypeNamespace()+"."+activatableClass.TypeName()] = true // activatable interfaces require activation
 	}
 
 	// generate exclusive interfaces
 	var exclusiveGenInterfaces []*genInterface
 	for _, iface := range exclusiveInterfaceTypes {
-		requiresActivation := activatedInterfaces[iface.TypeNamespace+"."+iface.TypeName]
+		requiresActivation := activatedInterfaces[iface.TypeNamespace()+"."+iface.TypeName()]
 		isExtendedInterface := !requiresActivation
 
 		ifaceGen, err := g.createGenInterface(iface, requiresActivation)
@@ -429,7 +429,7 @@ func (g *generator) createGenEnum(typeDef *winmdpkg.TypeDef) (*genEnum, error) {
 	// After the enum value definition comes a field definition for each of the values in the enumeration.
 	var enumValues []*genEnumValue
 	for _, field := range fields[1:] {
-		if !((field.Flags&flags.TypeAttributes_Public != 0) && field.Flags&flags.FieldAttributes_Static != 0 && field.Flags&flags.FieldAttributes_Literal != 0 && field.Flags&flags.FieldAttributes_HasDefault != 0) {
+		if !((field.Flags&flags.FieldAttributes_Public != 0) && field.Flags&flags.FieldAttributes_Static != 0 && field.Flags&flags.FieldAttributes_Literal != 0 && field.Flags&flags.FieldAttributes_HasDefault != 0) {
 			return nil,
 				fmt.Errorf(
 					"enum %s field value does not comply with the spec. Checkout https://docs.microsoft.com/en-us/uwp/winrt-cref/winmd-files#enums",
@@ -530,7 +530,7 @@ func (g *generator) createGenDelegate(typeDef *winmdpkg.TypeDef) (*genDelegate, 
 
 	// We only care about the invoke method
 	invokeMethod := methods[1]
-	if invokeMethod.Name != invokeMethodName {
+	if func() bool { s, _ := typeDef.Metadata().Strings.String(invokeMethod.Name.Start); return s.String() != invokeMethodName }() {
 		return nil, fmt.Errorf("found method '%s' on delegate %s but expected '%s'",
 			invokeMethod.Name,
 			typeDef.TypeNamespace()+"."+typeDef.TypeName(),
@@ -541,7 +541,7 @@ func (g *generator) createGenDelegate(typeDef *winmdpkg.TypeDef) (*genDelegate, 
 	// this is going to be used to define the callback type. We don't
 	// really need the whole function, only its input parameters,
 	// so we can reuse the logic used for getting them.
-	f, err := g.genFuncFromMethod(typeDef, &invokeMethod, "", false)
+	f, err := g.genFuncFromMethod(typeDef, invokeMethod, "", false)
 	if err != nil {
 		return nil, err
 	}
