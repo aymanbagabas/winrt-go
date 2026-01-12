@@ -208,6 +208,10 @@ func (v *iGattServiceProviderStatics) VTable() *iGattServiceProviderStaticsVtbl 
 	return (*iGattServiceProviderStaticsVtbl)(unsafe.Pointer(v.RawVTable))
 }
 
+// GattServiceProviderCreateAsyncResultSignature is the WinRT signature for the generic type argument of the GattServiceProviderCreateAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GattServiceProviderCreateAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattServiceProviderResult;{764696d8-c53e-428c-8a48-67afe02c3ae6})"
+
 func GattServiceProviderCreateAsync(serviceUuid syscall.GUID) (*foundation.IAsyncOperation, error) {
 	inspectable, err := ole.RoGetActivationFactory("Windows.Devices.Bluetooth.GenericAttributeProfile.GattServiceProvider", ole.NewGUID(GUIDiGattServiceProviderStatics))
 	if err != nil {

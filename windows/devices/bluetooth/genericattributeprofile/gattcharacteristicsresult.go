@@ -67,6 +67,10 @@ func (v *iGattCharacteristicsResult) GetStatus() (GattCommunicationStatus, error
 	return out, nil
 }
 
+// GetCharacteristicsResultSignature is the WinRT signature for the generic type argument of the GetCharacteristics return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetCharacteristicsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic;{59cb50c1-5934-4f68-a198-eb864fa44e6b})"
+
 func (v *iGattCharacteristicsResult) GetCharacteristics() (*collections.IVectorView, error) {
 	var out *collections.IVectorView
 	hr, _, _ := syscall.SyscallN(

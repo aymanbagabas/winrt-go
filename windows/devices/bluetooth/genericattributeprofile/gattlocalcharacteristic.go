@@ -256,6 +256,10 @@ func (v *iGattLocalCharacteristic) GetWriteProtectionLevel() (GattProtectionLeve
 	return out, nil
 }
 
+// CreateDescriptorAsyncResultSignature is the WinRT signature for the generic type argument of the CreateDescriptorAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const CreateDescriptorAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattLocalDescriptorResult;{375791be-321f-4366-bfc1-3bc6b82c79f8})"
+
 func (v *iGattLocalCharacteristic) CreateDescriptorAsync(descriptorUuid syscall.GUID, parameters *GattLocalDescriptorParameters) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -272,6 +276,10 @@ func (v *iGattLocalCharacteristic) CreateDescriptorAsync(descriptorUuid syscall.
 
 	return out, nil
 }
+
+// GetDescriptorsResultSignature is the WinRT signature for the generic type argument of the GetDescriptors return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetDescriptorsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattLocalDescriptor;{f48ebe06-789d-4a4b-8652-bd017b5d2fc6})"
 
 func (v *iGattLocalCharacteristic) GetDescriptors() (*collections.IVectorView, error) {
 	var out *collections.IVectorView
@@ -305,6 +313,10 @@ func (v *iGattLocalCharacteristic) GetUserDescription() (string, error) {
 	return out, nil
 }
 
+// GetPresentationFormatsResultSignature is the WinRT signature for the generic type argument of the GetPresentationFormats return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetPresentationFormatsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattPresentationFormat;{196d0021-faad-45dc-ae5b-2ac3184e84db})"
+
 func (v *iGattLocalCharacteristic) GetPresentationFormats() (*collections.IVectorView, error) {
 	var out *collections.IVectorView
 	hr, _, _ := syscall.SyscallN(
@@ -319,6 +331,10 @@ func (v *iGattLocalCharacteristic) GetPresentationFormats() (*collections.IVecto
 
 	return out, nil
 }
+
+// GetSubscribedClientsResultSignature is the WinRT signature for the generic type argument of the GetSubscribedClients return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetSubscribedClientsResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattSubscribedClient;{736e9001-15a4-4ec2-9248-e3f20d463be9})"
 
 func (v *iGattLocalCharacteristic) GetSubscribedClients() (*collections.IVectorView, error) {
 	var out *collections.IVectorView
@@ -440,6 +456,10 @@ func (v *iGattLocalCharacteristic) NotifyValueAsync(value *streams.IBuffer) (*fo
 
 	return out, nil
 }
+
+// NotifyValueForSubscribedClientAsyncResultSignature is the WinRT signature for the generic type argument of the NotifyValueForSubscribedClientAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const NotifyValueForSubscribedClientAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattClientNotificationResult;{506d5599-0112-419a-8e3b-ae21afabd2c2})"
 
 func (v *iGattLocalCharacteristic) NotifyValueForSubscribedClientAsync(value *streams.IBuffer, subscribedClient *GattSubscribedClient) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation

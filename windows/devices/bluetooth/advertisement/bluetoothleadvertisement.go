@@ -122,6 +122,10 @@ func (v *iBluetoothLEAdvertisement) SetLocalName(value string) error {
 	return nil
 }
 
+// GetServiceUuidsResultSignature is the WinRT signature for the generic type argument of the GetServiceUuids return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetServiceUuidsResultSignature string = "g16"
+
 func (v *iBluetoothLEAdvertisement) GetServiceUuids() (*collections.IVector, error) {
 	var out *collections.IVector
 	hr, _, _ := syscall.SyscallN(
@@ -137,6 +141,10 @@ func (v *iBluetoothLEAdvertisement) GetServiceUuids() (*collections.IVector, err
 	return out, nil
 }
 
+// GetManufacturerDataResultSignature is the WinRT signature for the generic type argument of the GetManufacturerData return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetManufacturerDataResultSignature string = "rc(Windows.Devices.Bluetooth.Advertisement.BluetoothLEManufacturerData;{912dba18-6963-4533-b061-4694dafb34e5})"
+
 func (v *iBluetoothLEAdvertisement) GetManufacturerData() (*collections.IVector, error) {
 	var out *collections.IVector
 	hr, _, _ := syscall.SyscallN(
@@ -151,6 +159,10 @@ func (v *iBluetoothLEAdvertisement) GetManufacturerData() (*collections.IVector,
 
 	return out, nil
 }
+
+// GetDataSectionsResultSignature is the WinRT signature for the generic type argument of the GetDataSections return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetDataSectionsResultSignature string = "rc(Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementDataSection;{d7213314-3a43-40f9-b6f0-92bfefc34ae3})"
 
 func (v *iBluetoothLEAdvertisement) GetDataSections() (*collections.IVector, error) {
 	var out *collections.IVector

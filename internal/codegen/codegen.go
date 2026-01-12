@@ -923,7 +923,52 @@ func (g *generator) elementType(ctx *types.Context, e types.Element) (*genParamT
 			defaultValue: g.elementDefaultValue(ctx, e),
 		}, nil
 	case types.ELEMENT_TYPE_GENERICINST:
-		fallthrough
+		// Handle generic instantiation (e.g., IAsyncOperation<TResult>)
+		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
+		if err != nil {
+			return nil, err
+		}
+
+		// Extract signatures for generic type arguments
+		var allGenericArgSignatures []string
+		for _, genericArgType := range e.Type.TypeDef.Generics {
+			// Convert ElementType to Element for signature generation
+			genericArg := types.Element{Type: genericArgType}
+			// Get the signature for each generic type argument
+			argSignature, err := g.elementTypeSignature(ctx, genericArg)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get signature for generic argument: %w", err)
+			}
+			_ = level.Debug(g.logger).Log("msg", "extracted generic arg signature", "type", namespace+"."+name, "argSignature", argSignature)
+			allGenericArgSignatures = append(allGenericArgSignatures, argSignature)
+		}
+		
+		// Filter out pinterface signatures and empty signatures
+		// We only want the actual type argument signatures (e.g., "rc(...)" or "enum(...)"), 
+		// not the full parameterized interface signatures (e.g., "pinterface({guid};...)").
+		// In some cases, the metadata contains both the full generic instantiation signature
+		// and the individual type argument signatures. For our use case (calling 
+		// ParameterizedInstanceGUID), we need only the individual type arguments.
+		// Example: For IAsyncOperation<GattResult>, we want "rc(GattResult;{...})" 
+		// not "pinterface({IAsyncOperation-guid};rc(GattResult;{...}))".
+		var genericArgSignatures []string
+		for _, sig := range allGenericArgSignatures {
+			if sig != "" && !strings.HasPrefix(sig, "pinterface(") {
+				genericArgSignatures = append(genericArgSignatures, sig)
+			}
+		}
+
+		_ = level.Debug(g.logger).Log("msg", "created genParamType with generic args", "type", namespace+"."+name, "numGenericArgs", len(genericArgSignatures))
+
+		return &genParamType{
+			namespace:            namespace,
+			name:                 name,
+			IsPointer:            true,
+			IsPrimitive:          false,
+			IsArray:              false,
+			GenericArgSignatures: genericArgSignatures,
+			defaultValue:         g.elementDefaultValue(ctx, e),
+		}, nil
 	case types.ELEMENT_TYPE_CLASS:
 		// return class name
 		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
@@ -1091,6 +1136,119 @@ func (g *generator) elementDefaultValue(ctx *types.Context, e types.Element) gen
 		return genDefaultValue{"nil", true}
 	default:
 		return genDefaultValue{"__ERROR_" + fmt.Errorf("unsupported element type: %v", e.Type.Kind).Error(), true}
+	}
+}
+
+// elementTypeSignature generates the WinRT type signature for a given element
+// This is used for generic type parameters
+func (g *generator) elementTypeSignature(ctx *types.Context, e types.Element) (string, error) {
+	switch e.Type.Kind {
+	// Primitive types
+	case types.ELEMENT_TYPE_BOOLEAN:
+		return winrt.SignatureBool, nil
+	case types.ELEMENT_TYPE_CHAR:
+		return winrt.SignatureChar, nil
+	case types.ELEMENT_TYPE_I1:
+		return winrt.SignatureInt8, nil
+	case types.ELEMENT_TYPE_U1:
+		return winrt.SignatureUInt8, nil
+	case types.ELEMENT_TYPE_I2:
+		return winrt.SignatureInt16, nil
+	case types.ELEMENT_TYPE_U2:
+		return winrt.SignatureUInt16, nil
+	case types.ELEMENT_TYPE_I4:
+		return winrt.SignatureInt32, nil
+	case types.ELEMENT_TYPE_U4:
+		return winrt.SignatureUInt32, nil
+	case types.ELEMENT_TYPE_I8:
+		return winrt.SignatureInt64, nil
+	case types.ELEMENT_TYPE_U8:
+		return winrt.SignatureUInt64, nil
+	case types.ELEMENT_TYPE_R4:
+		return winrt.SignatureFloat32, nil
+	case types.ELEMENT_TYPE_R8:
+		return winrt.SignatureFloat64, nil
+	case types.ELEMENT_TYPE_STRING:
+		return winrt.SignatureString, nil
+	case types.ELEMENT_TYPE_OBJECT:
+		// System.Object in WinRT is represented as IInspectable
+		// Its signature is: cinterface(IInspectable)
+		return "cinterface(IInspectable)", nil
+	case types.ELEMENT_TYPE_VAR:
+		// This represents a generic type parameter (T, TResult, etc.)
+		// When generating the definition of a generic type itself, we can't resolve the type parameter
+		// Just return an empty string - this will be filtered out
+		return "", nil
+	case types.ELEMENT_TYPE_GENERICINST:
+		// For generic instantiations, we need to generate a parameterized instance signature.
+		// Format: pinterface({base-guid};arg1-sig;arg2-sig;...)
+		// NOTE: This method returns the FULL signature including pinterface wrapper.
+		// The caller (elementType) will filter these out when extracting generic arguments,
+		// but this method still needs to generate them for cases where the full signature is needed.
+		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
+		if err != nil {
+			return "", err
+		}
+
+		// Get the base type definition
+		typeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)
+		if err != nil {
+			return "", err
+		}
+
+		// Get the GUID for the base generic type
+		guid, err := typeDef.GUID()
+		if err != nil {
+			return "", err
+		}
+
+		// Get signatures for all generic arguments (recursively)
+		var genericArgSignatures []string
+		for _, genericArgType := range e.Type.TypeDef.Generics {
+			// Convert ElementType to Element for signature generation
+			genericArg := types.Element{Type: genericArgType}
+			argSig, err := g.elementTypeSignature(ctx, genericArg)
+			if err != nil {
+				return "", err
+			}
+			genericArgSignatures = append(genericArgSignatures, argSig)
+		}
+
+		// Generate parameterized instance signature (not the GUID)
+		// This is the signature, NOT the final GUID
+		return fmt.Sprintf("pinterface({%s};%s)", guid, strings.Join(genericArgSignatures, ";")), nil
+	case types.ELEMENT_TYPE_CLASS:
+		// For class types, get the type signature
+		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
+		if err != nil {
+			return "", err
+		}
+
+		typeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)
+		if err != nil {
+			return "", err
+		}
+
+		return g.Signature(typeDef)
+	case types.ELEMENT_TYPE_VALUETYPE:
+		namespace, name, err := ctx.ResolveTypeDefOrRefName(e.Type.TypeDef.Index)
+		if err != nil {
+			return "", err
+		}
+
+		// Handle built-in types that might not be in the metadata
+		if namespace == "System" && name == "Guid" {
+			return winrt.SignatureGUID, nil
+		}
+
+		typeDef, err := g.mdStore.TypeDefByName(namespace + "." + name)
+		if err != nil {
+			return "", err
+		}
+
+		return g.Signature(typeDef)
+	default:
+		return "", fmt.Errorf("unsupported element type for signature generation: %s (kind=%d)", e.Type.Kind, e.Type.Kind)
 	}
 }
 

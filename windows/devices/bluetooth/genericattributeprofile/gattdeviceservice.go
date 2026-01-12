@@ -133,6 +133,10 @@ func (v *iGattDeviceService3) VTable() *iGattDeviceService3Vtbl {
 	return (*iGattDeviceService3Vtbl)(unsafe.Pointer(v.RawVTable))
 }
 
+// GetCharacteristicsAsyncResultSignature is the WinRT signature for the generic type argument of the GetCharacteristicsAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetCharacteristicsAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristicsResult;{1194945c-b257-4f3e-9db7-f68bc9a9aef2})"
+
 func (v *iGattDeviceService3) GetCharacteristicsAsync() (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -147,6 +151,10 @@ func (v *iGattDeviceService3) GetCharacteristicsAsync() (*foundation.IAsyncOpera
 
 	return out, nil
 }
+
+// GetCharacteristicsWithCacheModeAsyncResultSignature is the WinRT signature for the generic type argument of the GetCharacteristicsWithCacheModeAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetCharacteristicsWithCacheModeAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristicsResult;{1194945c-b257-4f3e-9db7-f68bc9a9aef2})"
 
 func (v *iGattDeviceService3) GetCharacteristicsWithCacheModeAsync(cacheMode bluetooth.BluetoothCacheMode) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation

@@ -89,6 +89,10 @@ func (v *iGattWriteRequestedEventArgs) GetDeferral() (*foundation.Deferral, erro
 	return out, nil
 }
 
+// GetRequestAsyncResultSignature is the WinRT signature for the generic type argument of the GetRequestAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetRequestAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteRequest;{aeb6a9ed-de2f-4fc2-a9a8-94ea7844f13d})"
+
 func (v *iGattWriteRequestedEventArgs) GetRequestAsync() (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(

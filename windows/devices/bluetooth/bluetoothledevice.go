@@ -182,6 +182,10 @@ func (v *iBluetoothLEDevice3) VTable() *iBluetoothLEDevice3Vtbl {
 	return (*iBluetoothLEDevice3Vtbl)(unsafe.Pointer(v.RawVTable))
 }
 
+// GetGattServicesAsyncResultSignature is the WinRT signature for the generic type argument of the GetGattServicesAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetGattServicesAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattDeviceServicesResult;{171dd3ee-016d-419d-838a-576cf475a3d8})"
+
 func (v *iBluetoothLEDevice3) GetGattServicesAsync() (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
 	hr, _, _ := syscall.SyscallN(
@@ -196,6 +200,10 @@ func (v *iBluetoothLEDevice3) GetGattServicesAsync() (*foundation.IAsyncOperatio
 
 	return out, nil
 }
+
+// GetGattServicesWithCacheModeAsyncResultSignature is the WinRT signature for the generic type argument of the GetGattServicesWithCacheModeAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const GetGattServicesWithCacheModeAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.GenericAttributeProfile.GattDeviceServicesResult;{171dd3ee-016d-419d-838a-576cf475a3d8})"
 
 func (v *iBluetoothLEDevice3) GetGattServicesWithCacheModeAsync(cacheMode BluetoothCacheMode) (*foundation.IAsyncOperation, error) {
 	var out *foundation.IAsyncOperation
@@ -308,6 +316,10 @@ func (v *iBluetoothLEDeviceStatics2) VTable() *iBluetoothLEDeviceStatics2Vtbl {
 	return (*iBluetoothLEDeviceStatics2Vtbl)(unsafe.Pointer(v.RawVTable))
 }
 
+// BluetoothLEDeviceFromBluetoothAddressWithBluetoothAddressTypeAsyncResultSignature is the WinRT signature for the generic type argument of the BluetoothLEDeviceFromBluetoothAddressWithBluetoothAddressTypeAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const BluetoothLEDeviceFromBluetoothAddressWithBluetoothAddressTypeAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.BluetoothLEDevice;{b5ee2f7b-4ad8-4642-ac48-80a0b500e887})"
+
 func BluetoothLEDeviceFromBluetoothAddressWithBluetoothAddressTypeAsync(bluetoothAddress uint64, bluetoothAddressType BluetoothAddressType) (*foundation.IAsyncOperation, error) {
 	inspectable, err := ole.RoGetActivationFactory("Windows.Devices.Bluetooth.BluetoothLEDevice", ole.NewGUID(GUIDiBluetoothLEDeviceStatics2))
 	if err != nil {
@@ -349,6 +361,10 @@ type iBluetoothLEDeviceStaticsVtbl struct {
 func (v *iBluetoothLEDeviceStatics) VTable() *iBluetoothLEDeviceStaticsVtbl {
 	return (*iBluetoothLEDeviceStaticsVtbl)(unsafe.Pointer(v.RawVTable))
 }
+
+// BluetoothLEDeviceFromBluetoothAddressAsyncResultSignature is the WinRT signature for the generic type argument of the BluetoothLEDeviceFromBluetoothAddressAsync return type.
+// This can be used with winrt.ParameterizedInstanceGUID to create the correct handler GUID.
+const BluetoothLEDeviceFromBluetoothAddressAsyncResultSignature string = "rc(Windows.Devices.Bluetooth.BluetoothLEDevice;{b5ee2f7b-4ad8-4642-ac48-80a0b500e887})"
 
 func BluetoothLEDeviceFromBluetoothAddressAsync(bluetoothAddress uint64) (*foundation.IAsyncOperation, error) {
 	inspectable, err := ole.RoGetActivationFactory("Windows.Devices.Bluetooth.BluetoothLEDevice", ole.NewGUID(GUIDiBluetoothLEDeviceStatics))
